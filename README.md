@@ -3,35 +3,89 @@
 [![npm version](https://img.shields.io/npm/v/pi-redact-all.svg)](https://www.npmjs.com/package/pi-redact-all)
 [![license: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/steimbyte/pi-redact-all/actions/workflows/ci.yml/badge.svg)](https://github.com/steimbyte/pi-redact-all/actions/workflows/ci.yml)
+[![GitHub release](https://img.shields.io/github/v/release/steimbyte/pi-redact-all)](https://github.com/steimbyte/pi-redact-all/releases)
 
-Global tool-output redaction for Pi — redacts secrets, certificates, PII, and connection strings across **all** tool outputs (bash, read, write, edit, MCP, etc.) and **user input** before they reach the model.
+> **The secret scanner for Pi that catches what `@spences10/pi-redact` misses — including X.509 certificates.**
+
+Global tool-output redaction for Pi that catches **secrets, certificates (X.509), PII, and connection strings** across **all tool outputs** (bash, read, write, edit, MCP) and **user input** — before they reach the model.
+
+---
+
+## Why pi-redact-all?
+
+| Concern | `@spences10/pi-redact` | `pi-redact-all` |
+|---------|------------------------|-----------------|
+| X.509 Certificates | ❌ Not detected | ✅ PEM + DER (ASN.1) |
+| SSH Private Keys | ✅ Yes | ✅ Yes (+ multi-chunk continuation) |
+| API Keys | ✅ Yes | ✅ Yes (more patterns) |
+| User-Input Filter | ❌ No | ✅ `before_agent_start` hook |
+| Final Provider-Payload Defense | ❌ No | ✅ `before_provider_request` (in-place) |
+| Performance | OK | **79x faster** on large outputs |
+| Test Coverage | Smoke only | **34 comprehensive tests** |
+
+---
 
 ## Features
 
-### Multi-Layer Detection (10 layers)
-- **L1**: Vendor API-Key Patterns (AWS, GitHub, Stripe, Google, OpenAI, Slack, etc.)
-- **L2**: PEM/X.509/PGP-Blocks (`CERTIFICATE`, `X509 CRL`, `PKCS7`, `CSR`, `PRIVATE KEY`, etc.)
-- **L3**: Vendor-Prefix Recognition (fast pre-check)
-- **L4**: Shannon-Entropy Heuristics (high-entropy tokens, allowlist-aware)
-- **L5**: ASN.1 SEQUENCE Detection (`MII…` DER blocks, even without PEM wrapper)
-- **L6**: Context-Anchored (`subject=`, `issuer=`, `SECRET=`, JSON/INI/YAML secret fields)
-- **L7**: File-Path Based (read-tool on `*.pem`, `id_rsa`, `.env`, `.aws/credentials`, etc.)
-- **L8**: PII (Email, Phone, IPv4, Credit Card with Luhn, SSN, IBAN) — opt-in
-- **L9+10**: Connection Strings & URL-Embedded Credentials
+### 10-Layer Detection
 
-### Hook Coverage
-| Hook | Purpose |
-|------|---------|
-| `tool_result` | Redact tool output before it reaches the LLM |
-| `tool_call` | Pre-block sensitive tool calls (e.g., `cat .env`, `cat id_rsa`) |
-| `before_agent_start` | **Filter user input before it enters the conversation** |
-| `message_end` | Filter assistant messages (last line of defense) |
-| `before_provider_request` | Filter the final provider payload before HTTP call |
+| # | Layer | Source | Catches |
+|---|-------|--------|---------|
+| **L1** | Vendor API-Key Patterns | Regex (pi-redact-compatible) | `ghp_*`, `xoxb-*`, `AKIA*`, `npm_*`, `AIza*`, `SG.*`, `sk-*`, `glpat-*`, `tvly-`, `BSA*`, `fc-*`, JWT, `github_pat_` |
+| **L2** | **PEM/X.509/PGP-Block-Erkennung** ⭐ | Regex mit Backreference | `CERTIFICATE`, `X509 CRL`, `PKCS7`, `CSR`, `PRIVATE KEY`, `PUBLIC KEY`, `OPENSSH`, `PGP`, `DH PARAMETERS`, `ENCRYPTED PRIVATE KEY`, `TRUSTED CERTIFICATE` |
+| **L3** | Vendor-Prefix-Erkennung | IndexOf + Length-Check | Schneller Pre-Pass für alle gängigen Token-Präfixe |
+| **L4** | Shannon-Entropy-Heuristik | `H = -Σ pᵢ·log₂ pᵢ` ≥ 4.5 | High-Entropy-Tokens ≥ 32 chars (Base64/Hex-Alphabet), Allowlist-aware |
+| **L5** | **ASN.1 SEQUENCE-Detection** ⭐ | Regex `/MII…` (DER-Heuristik) | Base64 DER-Blocks auch ohne PEM-Wrapper |
+| **L6** | Context-Anchored | `subject=`, `issuer=`, `verify return:1`, JSON/INI/YAML secret fields | OpenSSL-Output, Config-Files |
+| **L7** | File-Path-basierte | Path-Match (nur `read`-Tool) | `*.pem`, `*.crt`, `id_rsa`, `.env`, `.aws/credentials`, `.npmrc`, `.netrc`, `.docker/config.json` |
+| **L8** | PII (opt-in) | RFC 5322, E.164, Luhn-Check, ISO 13616 | Email, Phone, IPv4, Credit Card, SSN, IBAN |
+| **L9+10** | Connection-Strings & URL-Creds | Regex | `postgres://user:pass@host`, `https://user:pass@host` |
+
+### Pipeline (ordered)
+
+```
+L7 (Path) → L1 (Vendor) → L3 (Prefix) → L2 (PEM, with continuation tracking)
+→ L5 (ASN.1, skip if L2 wrapped) → L9+10 (Connections) → L6 (Context)
+→ L8 (PII) → L4 (Entropy, with allowlist)
+```
+
+Path detection runs first so sensitive paths (`.env`, `id_rsa`, etc.) protect the whole file. Entropy runs last (most expensive, least specific).
+
+### 5 Hooks (all schema-aware)
+
+| Hook | Phase | Schema | Return |
+|------|-------|--------|--------|
+| `tool_result` | PostToolUse | All 8 `ToolResultEvent` variants (bash, read, edit, write, grep, find, ls, custom/MCP) | Partial `{content?, details?, isError?, usage?}` |
+| `tool_call` | PreToolUse | All `ToolCallEvent` variants | `{block?, reason?}` or `undefined` |
+| `before_agent_start` | User-Input | `BeforeAgentStartEvent` | `{prompt?}` |
+| `message_end` | After Message | All `AgentMessage` roles (user, assistant, custom, bashExecution, branchSummary, compactionSummary, toolResult) | `{message?}` — preserves original shape exactly |
+| `before_provider_request` | Pre-HTTP | Opaque provider payload | **In-place mutation, returns void** |
 
 ### Visual Identity
-- Whitespace, linebreaks, and structure stay **1:1** — only matched spans are replaced
+
+- **Whitespace, linebreaks, JSON-Syntax stay 1:1** — only matched spans are replaced via `slice/concat` (no global `String.replace`)
 - Tools continue to function normally (they're already finished when we redact)
 - TUI shows the redacted output, indistinguishable from "normal" output
+- Already-redacted spans (`[REDACTED:...]`) are detected via binary search — no double-redaction
+
+---
+
+## Performance
+
+Optimized for large outputs (cat dumps, log files, certificates):
+
+| Benchmark | Time | Speedup |
+|-----------|------|---------|
+| 1,000 tokens | 11ms | 5x vs naive |
+| 10,000 tokens | 91ms | **79x** vs naive |
+| 100,000 tokens | 8.6s | >70x vs naive |
+
+**Key optimizations:**
+- `applyMatches`: `O(n²)` → `O(n)` via array-parts + join
+- `isInsideMarker`: `O(n)` rückwärts-Scan → `O(log n)` binary search with pre-built marker cache
+- `Layer 4` Entropy: cached marker spans, skip if already redacted
+
+---
 
 ## Installation
 
@@ -44,14 +98,19 @@ git clone https://github.com/steimbyte/pi-redact-all.git
 cd pi-redact-all
 npm install
 npm run build
-ln -s "$(pwd)" ~/.pi/agent/extensions/pi-redact-all
 ```
 
-Or symlink from anywhere:
+Add to `~/.pi/agent/settings.json`:
 
-```bash
-ln -s /path/to/pi-redact-all ~/.pi/agent/extensions/pi-redact-all
+```json
+{
+  "packages": [
+    "npm:pi-redact-all"
+  ]
+}
 ```
+
+---
 
 ## Configuration
 
@@ -83,24 +142,113 @@ ln -s /path/to/pi-redact-all ~/.pi/agent/extensions/pi-redact-all
 }
 ```
 
+---
+
 ## Commands
 
-- `/redact-all-stats` — Show session statistics
-- `/redact-all-config` — Show current configuration
+- `/redact-all-stats` — Session-Statistiken (per Layer, per Tool)
+- `/redact-all-config` — Aktuelle Config
+
+---
+
+## Marker-Format
+
+```
+[REDACTED:GitHub Token]
+[REDACTED:PEM CERTIFICATE]
+[REDACTED:Connection String with Password]
+[REDACTED:High Entropy Token]
+[REDACTED:ASN.1 SEQUENCE]
+[REDACTED:Protected File (PEM File)]
+```
+
+Kompatibel mit `@spences10/pi-redact` — beide nutzen `[REDACTED:...]`-Prefix, Boundary-Check verhindert Doppel-Redaction.
+
+---
+
+## Live-Test Evidence (2026-07-27)
+
+| Test | Input | Output |
+|------|-------|--------|
+| CA-Bundle (GIMP `cert.pem`, 229KB) | 152 Zertifikate | Alle redacted |
+| `cat test_key.pem` (OpenSSH) | Private Key | `[REDACTED:Private Key]` |
+| `cat test_cert.pem` (X.509) | Self-signed cert | `[REDACTED:PEM CERTIFICATE]` |
+| `cat ~/.ssh/config` | Host/User/IdentityFile | `[REDACTED:SSH ...]` |
+| `env \| grep KEY` | `MINIMAX_API_KEY`, etc. | `[REDACTED:Generic Password Field]` |
+| GitHub Token in Bash | `ghp_...` | `[REDACTED:GitHub Token]` |
+| Connection String | `postgres://admin:secret@host` | `postgres://admin:[REDACTED:Password]@host` |
+
+---
 
 ## Compatibility
 
-- Co-exists with `@spences10/pi-redact` (boundary check prevents double-redaction)
-- Marker format: `[REDACTED:TYPE]` (compatible with pi-redact's format)
-- PEM-blocks use specific marker: `[REDACTED:PEM CERTIFICATE]`
+- ✅ Co-exists with `@spences10/pi-redact` (boundary check prevents double-redaction)
+- ✅ All Pi version 0.81+ (uses stable `tool_result`/`tool_call` hooks)
+- ✅ Node.js 22+
+
+---
 
 ## Development
 
 ```bash
 npm install
-npm run build        # Compile TS to dist/
-npm test             # Run smoke tests
+npm run build                 # Compile TS → dist/
+npm run test                  # All 42 tests (8 smoke + 34 validation)
+node test/smoke-test.mjs      # Smoke tests only
+node test/hooks-test.mjs      # Hook schema tests
+node test/comprehensive-validation.mjs   # All tests
 ```
+
+### Test Coverage
+
+- **8 smoke tests** — Each detection layer against representative input
+- **21 hook tests** — Schema preservation for all AgentMessage roles + in-place mutation
+- **34 validation tests** — All 8 ToolResultEvent variants, edge cases, performance benchmarks
+
+### Release Process
+
+```bash
+# Bump version
+npm version patch|minor|major
+
+# Tag and push (triggers publish workflow)
+git push origin main
+git push origin vX.Y.Z
+```
+
+GitHub Actions publishes to npm with provenance on `v*` tags.
+
+---
+
+## Architecture
+
+```
+src/
+├── index.ts                 # Extension entry: registers 5 hooks
+├── hooks/
+│   ├── tool-result.ts       # PostToolUse redaction (all 8 variants)
+│   ├── tool-call.ts         # PreToolUse block (path/command scan)
+│   ├── before-provider.ts   # User-input filter + final provider-payload defense
+│   ├── message-end.ts       # Schema-aware AgentMessage filter
+│   └── content-utils.ts     # Content mapping helpers
+├── layers/
+│   ├── index.ts             # Pipeline orchestrator (9-layer chain)
+│   ├── layer-1-vendor.ts    # API-Key vendor patterns
+│   ├── layer-2-pem.ts       # PEM/X.509/PGP block detection
+│   ├── layer-3-prefix.ts    # Vendor-prefix pre-check
+│   ├── layer-4-entropy.ts   # Shannon entropy heuristics
+│   ├── layer-5-asn1.ts      # ASN.1 SEQUENCE (DER) detection
+│   ├── layer-6-context.ts   # Context-anchored (subject=, JSON/INI/YAML secrets)
+│   ├── layer-7-path.ts      # File-path based (read-tool)
+│   ├── layer-8-pii.ts       # PII (opt-in)
+│   ├── layer-9-10-connection.ts  # Connection strings & URL creds
+│   └── shared.ts            # buildMarker, buildMarkerCache, isInsideMarker, applyMatches
+├── stats.ts                 # Session statistics
+├── config.ts                # Config loader (~/.pi/agent/pi-redact-all.json)
+└── types.ts                 # Shared types
+```
+
+---
 
 ## License
 
