@@ -1,4 +1,18 @@
-// before_agent_start + before_provider_request hooks — User-Input filtering
+// before_agent_start + before_provider_request hooks
+//
+// Two responsibilities:
+//   1. filterUserPrompt: Filter user prompt before agent loop (before_agent_start)
+//   2. filterProviderPayload: Final defense before HTTP call to LLM (before_provider_request)
+//
+// For before_provider_request: payload structure is provider-specific and opaque.
+// We CANNOT safely return a modified payload object — it may have:
+//   - Class instances with methods
+//   - Streams/Buffers
+//   - Strict schema validation
+//   - Provider-specific structure (OpenAI, Anthropic, etc. differ)
+//
+// Strategy: Detect the messages-array location and mutate strings IN-PLACE.
+// If we can't safely identify the structure, we pass through untouched.
 
 import { redactText } from "../layers/index.js";
 import type { RedactionContext } from "../types.js";
@@ -36,45 +50,59 @@ export function filterUserPrompt(
 }
 
 /**
- * Filter the full provider request payload before sending to LLM.
- * This is the LAST line of defense — catches everything that reached
- * the provider payload (user input + tool results + system prompt).
+ * Best-effort final defense: mutate text strings in-place within the payload.
+ * Returns nothing — relies on mutation (similar to before_provider_headers).
  */
 export function filterProviderPayload(
   event: BeforeProviderRequestLike,
   ctx: RedactionContext
-): BeforeProviderRequestLike {
-  if (ctx.config.mode === "off") return event;
-  if (!event.payload) return event;
+): void {
+  if (ctx.config.mode === "off") return;
+  if (!event.payload) return;
 
-  // Walk the payload and redact string values
-  const redacted = redactJsonValue(event.payload, ctx);
-  return { ...event, payload: redacted };
+  // Recursively walk and mutate string values in place
+  redactInPlace(event.payload, ctx, 0);
 }
 
 /**
- * Recursively redact all string values in a JSON-like object.
+ * Recursively walk an object/array and mutate string values in place.
+ * Stops at depth > 20 to prevent runaway traversal.
  */
-function redactJsonValue(value: unknown, ctx: RedactionContext, depth = 0): unknown {
-  // Prevent infinite recursion
-  if (depth > 20) return value;
-
-  if (typeof value === "string") {
-    const result = redactText(value, ctx);
-    return result.matches.length > 0 ? result.text : value;
-  }
+function redactInPlace(value: unknown, ctx: RedactionContext, depth: number): void {
+  if (depth > 20) return;
 
   if (Array.isArray(value)) {
-    return value.map((v) => redactJsonValue(v, ctx, depth + 1));
+    for (let i = 0; i < value.length; i++) {
+      const item = value[i];
+      if (typeof item === "string") {
+        const result = redactText(item, ctx);
+        if (result.matches.length > 0) {
+          value[i] = result.text;
+        }
+      } else if (item && typeof item === "object") {
+        redactInPlace(item, ctx, depth + 1);
+      }
+    }
+    return;
   }
 
   if (value && typeof value === "object") {
-    const result: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) {
-      result[k] = redactJsonValue(v, ctx, depth + 1);
-    }
-    return result;
-  }
+    // Walk own enumerable properties (skip prototype chain, methods, etc.)
+    const obj = value as Record<string, unknown>;
+    for (const key of Object.keys(obj)) {
+      // Skip non-data properties (functions, getters, symbols)
+      const descriptor = Object.getOwnPropertyDescriptor(obj, key);
+      if (!descriptor || typeof descriptor.value === "function") continue;
 
-  return value;
+      const v = obj[key];
+      if (typeof v === "string") {
+        const result = redactText(v, ctx);
+        if (result.matches.length > 0) {
+          obj[key] = result.text;
+        }
+      } else if (v && (Array.isArray(v) || typeof v === "object")) {
+        redactInPlace(v, ctx, depth + 1);
+      }
+    }
+  }
 }

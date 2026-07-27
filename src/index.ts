@@ -120,21 +120,37 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ──────────────────────────────────────────────────────────────
-  // ASSISTANT-MESSAGE HOOK: Last-line filter for assistant output
-  // DISABLED BY DEFAULT: AgentMessage is a union-type (custom/bashExecution/
-  // branchSummary/compactionSummary + user/assistant/toolResult). Returning
-  // {role, content} breaks the schema for custom message types and causes
-  // provider 400 errors. Enable only via config after schema-aware re-implementation.
+  // ASSISTANT-MESSAGE HOOK: Schema-aware filter (preserves AgentMessage union)
+  // v0.1.2 fix: Now correctly handles custom/bashExecution/branchSummary/
+  // compactionSummary by passing them through untouched, and only mutates
+  // text content within user/assistant/custom roles.
   // ──────────────────────────────────────────────────────────────
-  // pi.on("message_end", async (event: unknown) => { ... });
+  pi.on("message_end", async (event: unknown) => {
+    const e = event as MessageEndLike;
+    const ctx = makeContext(e.message.role);
+    const result = filterMessage(e, ctx);
+    if (result.message) {
+      recordMatches(
+        stats,
+        Array(1).fill({ start: 0, end: 0, type: "assistant-message", replacement: "" }),
+        `message:${e.message.role}`
+      );
+    }
+    return result;
+  });
 
   // ──────────────────────────────────────────────────────────────
-  // PROVIDER-PAYLOAD HOOK: Final defense before HTTP call to LLM
-  // DISABLED BY DEFAULT: payload is `unknown` and providers reject 400 if
-  // schema is violated. Re-enable only with proper schema-aware mutation
-  // (in-place, not return-value).
+  // PROVIDER-PAYLOAD HOOK: In-place mutation (no return value)
+  // v0.1.2 fix: Mutates payload in place rather than returning a new object,
+  // since providers strictly validate the payload schema.
   // ──────────────────────────────────────────────────────────────
-  // pi.on("before_provider_request", async (event: unknown) => { ... });
+  pi.on("before_provider_request", async (event: unknown) => {
+    const e = event as BeforeProviderRequestLike;
+    const ctx = makeContext("provider_payload");
+    filterProviderPayload(e, ctx);
+    // Return undefined — relies on in-place mutation
+    return undefined;
+  });
 
   // ──────────────────────────────────────────────────────────────
   // COMMANDS
