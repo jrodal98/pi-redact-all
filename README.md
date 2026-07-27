@@ -1,5 +1,9 @@
 # pi-redact-all
 
+[![npm version](https://img.shields.io/npm/v/pi-redact-all.svg)](https://www.npmjs.com/package/pi-redact-all)
+[![license: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/steimbyte/pi-redact-all/actions/workflows/ci.yml/badge.svg)](https://github.com/steimbyte/pi-redact-all/actions/workflows/ci.yml)
+
 Global tool-output redaction for Pi — redacts secrets, certificates, PII, and connection strings across **all** tool outputs (bash, read, write, edit, MCP, etc.) and **user input** before they reach the model.
 
 ## Features
@@ -32,8 +36,11 @@ Global tool-output redaction for Pi — redacts secrets, certificates, PII, and 
 ## Installation
 
 ```bash
+# From npm (recommended)
+pi install npm:pi-redact-all
+
 # From source (development)
-git clone <repo>
+git clone https://github.com/steimbyte/pi-redact-all.git
 cd pi-redact-all
 npm install
 npm run build
