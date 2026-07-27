@@ -2,7 +2,7 @@
 // Erkennt postgres://user:pass@host und https://user:pass@host
 
 import type { Match, RedactionContext, LayerResult } from "../types.js";
-import { isInsideExistingMarker } from "./shared.js";
+import { buildMarkerCache, isInsideMarker } from "./shared.js";
 
 const CONNECTION_STRING_RE = /\b([a-z][a-z0-9+.\-]*):\/\/([^:\s]+):([^@\s\/]+)@([^\s\/]+)/gi;
 
@@ -11,8 +11,10 @@ const URL_WITH_CREDS_RE = /https?:\/\/([^:\s]+):([^@\s\/]+)@([^\s\/]+)/gi;
 export function apply(text: string, ctx: RedactionContext): LayerResult {
   const matches: Match[] = [];
 
-  pushAll(text, CONNECTION_STRING_RE, matches, "Connection String", (m) => {
-    // m[1] = scheme, m[2] = user, m[3] = pass, m[4] = host
+  // PERFORMANCE: marker cache
+  const markerCache = buildMarkerCache(text);
+
+  pushAll(text, CONNECTION_STRING_RE, matches, "Connection String", markerCache, (m) => {
     return {
       start: m.index,
       end: m.index + m[0].length,
@@ -21,7 +23,7 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
     };
   });
 
-  pushAll(text, URL_WITH_CREDS_RE, matches, "URL Credentials", (m) => {
+  pushAll(text, URL_WITH_CREDS_RE, matches, "URL Credentials", markerCache, (m) => {
     return {
       start: m.index,
       end: m.index + m[0].length,
@@ -38,6 +40,7 @@ function pushAll(
   pattern: RegExp,
   matches: Match[],
   _type: string,
+  markerCache: ReturnType<typeof buildMarkerCache>,
   mapper: (m: RegExpExecArray) => { start: number; end: number; type: string; replacement: string } | null
 ) {
   pattern.lastIndex = 0;
@@ -45,7 +48,7 @@ function pushAll(
   while ((m = pattern.exec(text)) !== null) {
     const result = mapper(m);
     if (!result) continue;
-    if (isInsideExistingMarker(text, result.start, result.end)) continue;
+    if (isInsideMarker(markerCache, result.start, result.end)) continue;
     if (matchesOverlapExisting(matches, result.start, result.end)) continue;
     matches.push(result);
   }

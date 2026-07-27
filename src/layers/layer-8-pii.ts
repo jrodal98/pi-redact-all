@@ -2,7 +2,7 @@
 // Erkennt Email, Telefon, IPv4, Kreditkarten, SSN, IBAN
 
 import type { Match, RedactionContext, LayerResult } from "../types.js";
-import { isInsideExistingMarker } from "./shared.js";
+import { buildMarkerCache, isInsideMarker } from "./shared.js";
 
 const EMAIL_RE = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g;
 
@@ -40,22 +40,25 @@ function isLuhnValid(digits: string): boolean {
 export function apply(text: string, ctx: RedactionContext): LayerResult {
   const matches: Match[] = [];
 
+  // PERFORMANCE: marker cache
+  const markerCache = buildMarkerCache(text);
+
   // Email
-  pushAll(text, EMAIL_RE, matches, "Email");
+  pushAll(text, EMAIL_RE, matches, "Email", markerCache);
   // Phone
-  pushAll(text, PHONE_DE_RE, matches, "Phone");
-  pushAll(text, PHONE_E164_RE, matches, "Phone");
+  pushAll(text, PHONE_DE_RE, matches, "Phone", markerCache);
+  pushAll(text, PHONE_E164_RE, matches, "Phone", markerCache);
   // IPv4
-  pushAll(text, IPV4_RE, matches, "IPv4");
+  pushAll(text, IPV4_RE, matches, "IPv4", markerCache);
   // Credit Card (with Luhn check)
-  pushAll(text, CREDIT_CARD_RE, matches, "Credit Card", (value) => {
+  pushAll(text, CREDIT_CARD_RE, matches, "Credit Card", markerCache, (value) => {
     const digits = value.replace(/\D/g, "");
     return digits.length >= 13 && isLuhnValid(digits);
   });
   // SSN
-  pushAll(text, SSN_RE, matches, "SSN");
+  pushAll(text, SSN_RE, matches, "SSN", markerCache);
   // IBAN
-  pushAll(text, IBAN_RE, matches, "IBAN");
+  pushAll(text, IBAN_RE, matches, "IBAN", markerCache);
 
   return { matches };
 }
@@ -65,6 +68,7 @@ function pushAll(
   pattern: RegExp,
   matches: Match[],
   type: string,
+  markerCache: ReturnType<typeof buildMarkerCache>,
   validator?: (value: string) => boolean
 ) {
   pattern.lastIndex = 0;
@@ -72,7 +76,7 @@ function pushAll(
   while ((m = pattern.exec(text)) !== null) {
     const start = m.index;
     const end = start + m[0].length;
-    if (isInsideExistingMarker(text, start, end)) continue;
+    if (isInsideMarker(markerCache, start, end)) continue;
     if (matchesOverlapExisting(matches, start, end)) continue;
     if (validator && !validator(m[0])) continue;
 

@@ -2,7 +2,7 @@
 // Erkennt Key=Value-Paare mit sensitiven Schlüsselnamen
 
 import type { Match, RedactionContext, LayerResult } from "../types.js";
-import { isInsideExistingMarker } from "./shared.js";
+import { buildMarkerCache, isInsideMarker } from "./shared.js";
 
 const SECRET_FIELD_NAMES = [
   "password",
@@ -65,17 +65,19 @@ const ANCHOR_RE = new RegExp(ANCHORS.map((a) => a.replace(/[.*+?^${}()|[\]\\]/g,
 export function apply(text: string, ctx: RedactionContext): LayerResult {
   const matches: Match[] = [];
 
+  // PERFORMANCE: marker cache
+  const markerCache = buildMarkerCache(text);
+
   // JSON-style: "secret_key": "value"
-  pushAllMatches(text, JSON_SECRET_KEY_PATTERN, matches, "JSON Secret Field");
+  pushAllMatches(text, JSON_SECRET_KEY_PATTERN, matches, "JSON Secret Field", markerCache);
   // ENV-style: SECRET=value
-  pushAllMatches(text, ENV_SECRET_PATTERN, matches, "Env Secret Field");
+  pushAllMatches(text, ENV_SECRET_PATTERN, matches, "Env Secret Field", markerCache);
   // INI-style: secret = value
-  pushAllMatches(text, INI_SECRET_PATTERN, matches, "INI Secret Field");
+  pushAllMatches(text, INI_SECRET_PATTERN, matches, "INI Secret Field", markerCache);
   // YAML-style: secret: value
-  pushAllMatches(text, YAML_SECRET_PATTERN, matches, "YAML Secret Field");
+  pushAllMatches(text, YAML_SECRET_PATTERN, matches, "YAML Secret Field", markerCache);
 
   // Anchor lines: subject=, issuer=, etc.
-  // We only mark the value after the =, not the whole line
   ANCHOR_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = ANCHOR_RE.exec(text)) !== null) {
@@ -90,7 +92,7 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
       if (value.length >= 4) {
         const start = valueStart + (text.slice(valueStart, valueEnd).length - text.slice(valueStart, valueEnd).trimStart().length);
         const end = valueEnd;
-        if (!isInsideExistingMarker(text, start, end)) {
+        if (!isInsideMarker(markerCache, start, end)) {
           if (!matchesOverlapExisting(matches, start, end)) {
             matches.push({
               start,
@@ -112,6 +114,7 @@ function pushAllMatches(
   pattern: RegExp,
   matches: Match[],
   type: string,
+  markerCache: ReturnType<typeof buildMarkerCache>,
   preserveCapturedGroup = 1
 ) {
   pattern.lastIndex = 0;
@@ -119,12 +122,11 @@ function pushAllMatches(
   while ((m = pattern.exec(text)) !== null) {
     const captured = m[preserveCapturedGroup];
     if (!captured) continue;
-    // Find the captured group position in the input
     const capturedIdx = m[0].indexOf(captured);
     if (capturedIdx === -1) continue;
     const start = m.index + capturedIdx;
     const end = start + captured.length;
-    if (isInsideExistingMarker(text, start, end)) continue;
+    if (isInsideMarker(markerCache, start, end)) continue;
     if (matchesOverlapExisting(matches, start, end)) continue;
     matches.push({
       start,

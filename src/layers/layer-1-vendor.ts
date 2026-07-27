@@ -2,7 +2,7 @@
 // Erkennt API-Keys, Tokens, Credentials von bekannten Herstellern
 
 import type { Match, RedactionContext, LayerResult } from "../types.js";
-import { buildMarker, applyMatches, isInsideExistingMarker } from "./shared.js";
+import { buildMarker, buildMarkerCache, isInsideMarker, hasOverlap } from "./shared.js";
 
 interface Pattern {
   name: string;
@@ -42,13 +42,17 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
   const matches: Match[] = [];
   const allowlist = compileAllowlist(ctx.config.allowlistRegex);
 
+  // PERFORMANCE: Build marker cache once, use O(log n) checks per match
+  const markerCache = buildMarkerCache(text);
+
   for (const { name, pattern } of PATTERNS) {
     pattern.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = pattern.exec(text)) !== null) {
       const start = m.index;
       const end = start + m[0].length;
-      if (isInsideExistingMarker(text, start, end)) continue;
+      if (isInsideMarker(markerCache, start, end)) continue;
+      // matches list not yet sorted — use O(n) but list grows linearly with patterns
       if (matchesOverlapExisting(matches, start, end)) continue;
       if (allowlist.test(m[0])) continue;
       matches.push({

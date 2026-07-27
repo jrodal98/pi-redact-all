@@ -18,18 +18,23 @@ interface Layer {
 }
 
 const ALL_LAYERS: Layer[] = [
+  { id: "path", apply: layer7.apply },      // Path-detection FIRST — if path is sensitive, protect everything
   { id: "vendor", apply: layer1.apply },
   { id: "prefix", apply: layer3.apply },
   { id: "pem", apply: layer2.apply },
   { id: "asn1", apply: layer5.apply },
   { id: "context", apply: layer6.apply },
   { id: "connection", apply: layer9.apply },
-  { id: "path", apply: layer7.apply },
   { id: "pii", apply: layer8.apply },
-  { id: "entropy", apply: layer4.apply },
+  { id: "entropy", apply: layer4.apply },   // Entropy LAST — most expensive, least specific
 ];
 
 export function redactText(text: string, ctx: RedactionContext): { text: string; matches: Match[] } {
+  // Graceful handling of null/undefined/empty
+  if (!text || typeof text !== "string") {
+    return { text: "", matches: [] };
+  }
+
   let current = text;
   const allMatches: Match[] = [];
 

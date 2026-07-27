@@ -2,7 +2,7 @@
 // Schnelle Vorprüfung auf bekannte Präfixe — getrennt von Layer 1 für schnellen Pass
 
 import type { Match, RedactionContext, LayerResult } from "../types.js";
-import { buildMarker, isInsideExistingMarker } from "./shared.js";
+import { buildMarker, buildMarkerCache, isInsideMarker } from "./shared.js";
 
 const PREFIX_PATTERNS: { prefix: string; name: string }[] = [
   { prefix: "ghp_", name: "GitHub Token" },
@@ -32,6 +32,9 @@ const PREFIX_PATTERNS: { prefix: string; name: string }[] = [
 export function apply(text: string, ctx: RedactionContext): LayerResult {
   const matches: Match[] = [];
 
+  // PERFORMANCE: Build marker cache once
+  const markerCache = buildMarkerCache(text);
+
   for (const { prefix, name } of PREFIX_PATTERNS) {
     let searchFrom = 0;
     while (true) {
@@ -45,7 +48,7 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
       const value = text.slice(idx, end);
       // Heuristic: token must be at least prefix + 8 chars
       if (value.length >= prefix.length + 8) {
-        if (!isInsideExistingMarker(text, idx, end)) {
+        if (!isInsideMarker(markerCache, idx, end)) {
           if (!matchesOverlapExisting(matches, idx, end)) {
             matches.push({
               start: idx,

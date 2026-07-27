@@ -2,12 +2,15 @@
 // Erkennt DER-encoded ASN.1-Strukturen (Base64 beginnend mit MII…)
 
 import type { Match, RedactionContext, LayerResult } from "../types.js";
-import { isInsideExistingMarker } from "./shared.js";
+import { buildMarkerCache, isInsideMarker } from "./shared.js";
 
 const ASN1_RE = /(?:^|\s)(MI[A-Za-z0-9+/=]{100,}={0,2})(?=\s|$)/gm;
 
 export function apply(text: string, ctx: RedactionContext): LayerResult {
   const matches: Match[] = [];
+
+  // PERFORMANCE: marker cache
+  const markerCache = buildMarkerCache(text);
 
   ASN1_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -15,7 +18,7 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
     // Skip if previous char is inside REDACTED marker
     const start = m.index + m[0].indexOf(m[1]);
     const end = start + m[1].length;
-    if (isInsideExistingMarker(text, start, end)) continue;
+    if (isInsideMarker(markerCache, start, end)) continue;
     if (matchesOverlapExisting(matches, start, end)) continue;
 
     // Skip if already wrapped in a PEM block (Layer 2 would have caught it)

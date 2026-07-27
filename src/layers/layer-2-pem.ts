@@ -2,7 +2,7 @@
 // Erkennt strukturierte PEM-Blöcke mit Header/Footer
 
 import type { Match, RedactionContext, LayerResult } from "../types.js";
-import { applyMatches, isInsideExistingMarker } from "./shared.js";
+import { buildMarkerCache, isInsideMarker } from "./shared.js";
 
 const PEM_LABELS = [
   "PRIVATE KEY",
@@ -69,6 +69,9 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
   // First: handle multi-chunk private key paths
   matches.push(...detectPartialKey(text, ctx));
 
+  // PERFORMANCE: marker cache for O(log n) checks
+  const markerCache = buildMarkerCache(text);
+
   // Now scan PEM blocks
   PEM_BLOCK_REGEX.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -76,7 +79,7 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
     const label = m[1];
     const start = m.index;
     const end = start + m[0].length;
-    if (isInsideExistingMarker(text, start, end)) continue;
+    if (isInsideMarker(markerCache, start, end)) continue;
     if (matchesOverlapExisting(matches, start, end)) continue;
 
     matches.push({

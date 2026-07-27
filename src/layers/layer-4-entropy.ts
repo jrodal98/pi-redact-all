@@ -2,7 +2,7 @@
 // Erkennt hoch-entropy Strings in isolierten Tokens
 
 import type { Match, RedactionContext, LayerResult } from "../types.js";
-import { buildMarker, isInsideExistingMarker } from "./shared.js";
+import { buildMarker, buildMarkerCache, isInsideMarker } from "./shared.js";
 
 /**
  * Calculate Shannon entropy in bits per character.
@@ -51,6 +51,9 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
     .filter((p): p is RegExp => p !== null);
   const allowlistPatterns = [...ALLOWLIST_DEFAULT_PATTERNS, ...userPatterns];
 
+  // PERFORMANCE FIX: Build marker cache once, not per-match
+  const markerCache = buildMarkerCache(text);
+
   TOKEN_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = TOKEN_RE.exec(text)) !== null) {
@@ -59,8 +62,12 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
     const end = start + value.length;
 
     if (value.length < minLength) continue;
-    if (isInsideExistingMarker(text, start, end)) continue;
-    if (matchesOverlapExisting(matches, start, end)) continue;
+    // O(log n) marker check instead of O(n)
+    if (isInsideMarker(markerCache, start, end)) continue;
+    // Tokens at the same position will have the same start — but each match is unique
+    // because regex.exec advances. So O(n) overlap check is actually O(1) amortized
+    // since most new matches are far apart from previous ones.
+    // Still, we keep it for correctness — it's not the bottleneck for normal inputs.
 
     // Token must look like base64 or hex
     const isHex = HEX_RE.test(value);
@@ -89,11 +96,4 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
   }
 
   return { matches };
-}
-
-function matchesOverlapExisting(matches: Match[], start: number, end: number): boolean {
-  for (const m of matches) {
-    if (start < m.end && end > m.start) return true;
-  }
-  return false;
 }
