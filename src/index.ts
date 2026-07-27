@@ -121,29 +121,20 @@ export default function (pi: ExtensionAPI) {
 
   // ──────────────────────────────────────────────────────────────
   // ASSISTANT-MESSAGE HOOK: Last-line filter for assistant output
+  // DISABLED BY DEFAULT: AgentMessage is a union-type (custom/bashExecution/
+  // branchSummary/compactionSummary + user/assistant/toolResult). Returning
+  // {role, content} breaks the schema for custom message types and causes
+  // provider 400 errors. Enable only via config after schema-aware re-implementation.
   // ──────────────────────────────────────────────────────────────
-  pi.on("message_end", async (event: unknown) => {
-    const e = event as MessageEndLike;
-    const ctx = makeContext(e.message.role);
-    const result = filterMessage(e, ctx);
-    if (result.message) {
-      recordMatches(
-        stats,
-        Array(1).fill({ start: 0, end: 0, type: "assistant-message", replacement: "" }),
-        `assistant:${e.message.role}`
-      );
-    }
-    return result;
-  });
+  // pi.on("message_end", async (event: unknown) => { ... });
 
   // ──────────────────────────────────────────────────────────────
   // PROVIDER-PAYLOAD HOOK: Final defense before HTTP call to LLM
+  // DISABLED BY DEFAULT: payload is `unknown` and providers reject 400 if
+  // schema is violated. Re-enable only with proper schema-aware mutation
+  // (in-place, not return-value).
   // ──────────────────────────────────────────────────────────────
-  pi.on("before_provider_request", async (event: unknown) => {
-    const e = event as BeforeProviderRequestLike;
-    const ctx = makeContext("provider_payload");
-    return filterProviderPayload(e, ctx);
-  });
+  // pi.on("before_provider_request", async (event: unknown) => { ... });
 
   // ──────────────────────────────────────────────────────────────
   // COMMANDS
