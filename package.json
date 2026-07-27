@@ -37,7 +37,20 @@
   "pi": {
     "extensions": [
       "./dist/index.js"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/steimbyte/pi-redact-all/main/assets/preview.png"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/steimbyte/pi-redact-all.git"
+  },
+  "homepage": "https://github.com/steimbyte/pi-redact-all#readme",
+  "bugs": {
+    "url": "https://github.com/steimbyte/pi-redact-all/issues"
+  },
+  "author": {
+    "name": "Benjamin Steimer",
+    "url": "https://github.com/steimbyte"
   },
   "devDependencies": {
     "typescript": "^5.5.0",
