@@ -5,6 +5,55 @@ All notable changes to `pi-redact-all` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-07-30
+
+### Fixed (CRITICAL — image base64 corruption in Anthropic format)
+
+Image binary data passed in the Anthropic conversion format
+`{ type: "image", source: { type: "base64", media_type, data } }` was still
+being corrupted by Layer 1 (vendor) and Layer 4 (entropy). When a long
+base64 byte sequence happened to contain a vendor-prefixed substring
+(e.g. `AKIA...`, `xoxb-...`, `ghp_...`), the redaction layer matched it
+inside the `data` field and replaced it with `[REDACTED:...]`. Anthropic
+then rejected the request with HTTP 400:
+
+```
+invalid_request_error: invalid param: decode base64 data url:
+illegal base64 data at input byte 4 (2013)
+```
+
+Root cause: the v0.1.4 protection in `isProtectedImageKey()` checked the
+**grandparent** for `source.type === "base64"`, but when the recursive
+walker descended into the `source` object, the `parent` *was* the source
+itself — and neither structural check matched. The protection silently
+failed for Anthropic-format payloads.
+
+v0.1.7 adds a third structural check: when the parent object itself has
+`type === "base64"` AND a `media_type` string field, the `data` key is
+recognised as Anthropic image payload and protected from redaction.
+
+### Added
+
+- `test/image-payload-v0.1.6.test.mjs` — 5 regression tests, including the
+  reported bug case (Anthropic `source.data` with embedded vendor prefix
+  bytes must survive bytewise), an end-to-end tool_result → message_end →
+  before_provider_request chain, and a Pi-internal `{type:"image", data}`
+  round-trip.
+
+### Tests
+
+| Suite                          | Result |
+|--------------------------------|--------|
+| image-payload-v0.1.6 (new)     | 5/5    |
+| data-url-v0.1.5                | 12/12  |
+| hooks-test                     | 21/21  |
+| image-payload-v0.1.4           | 10/10  |
+| path-context-v0.1.4            | 12/12  |
+| comprehensive-validation       | 34/34  |
+| smoke-test                     |  8/8   |
+| perf-v0.1.6                    |  7/7   |
+| **Total**                      | **109/109** |
+
 ## [0.1.6] - 2026-07-30
 
 ### Changed (Performance — large speedups on common workloads)

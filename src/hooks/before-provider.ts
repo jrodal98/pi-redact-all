@@ -87,11 +87,27 @@ export function filterProviderPayload(
  */
 function isProtectedImageKey(parent: Record<string, unknown>, key: string, value: unknown): boolean {
   // Anthropic image.source.data — guarded by the `source` wrapper.
+  // The check has to look at the GRANDPARENT (the outer `{type:"image"}` block)
+  // because when the recursive walker enters the `source` object the *parent*
+  // is the source itself.
   if (key === "data" && parent && typeof parent === "object" && "source" in parent) {
     const source = (parent as { source?: unknown }).source;
     if (source && typeof source === "object" && (source as { type?: unknown }).type === "base64") {
       return true;
     }
+  }
+
+  // v0.1.6: when we're INSIDE an Anthropic image.source object, the parent
+  // has the discriminator `type === "base64"` and a `media_type` field.
+  // Recognise that and skip the data field, since Anthropic would otherwise
+  // see a redaction marker inside the base64 and reject the request with
+  // "illegal base64 data at input byte N".
+  if (key === "data" &&
+      parent &&
+      typeof parent === "object" &&
+      (parent as { type?: unknown }).type === "base64" &&
+      typeof (parent as { media_type?: unknown }).media_type === "string") {
+    return true;
   }
 
   // Pi internal: a ContentItem with type === "image" OR toolResult attachments.
