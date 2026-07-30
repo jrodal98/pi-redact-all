@@ -2,7 +2,7 @@
 // Erkennt API-Keys, Tokens, Credentials von bekannten Herstellern
 
 import type { Match, RedactionContext, LayerResult } from "../types.js";
-import { buildMarker, buildMarkerCache, isInsideMarker, hasOverlap } from "./shared.js";
+import { buildMarker, buildMarkerCache, isInsideMarker, isInsidePathContext } from "./shared.js";
 
 interface Pattern {
   name: string;
@@ -55,6 +55,9 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
       // matches list not yet sorted — use O(n) but list grows linearly with patterns
       if (matchesOverlapExisting(matches, start, end)) continue;
       if (allowlist.test(m[0])) continue;
+      // v0.1.4: skip matches inside path-like contexts so we never corrupt legitimate
+      // file names that happen to contain a token shaped like a vendor key.
+      if (isInsidePathContext(text, start, end)) continue;
       matches.push({
         start,
         end,

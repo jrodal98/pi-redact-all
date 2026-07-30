@@ -2,7 +2,7 @@
 // Schnelle Vorprüfung auf bekannte Präfixe — getrennt von Layer 1 für schnellen Pass
 
 import type { Match, RedactionContext, LayerResult } from "../types.js";
-import { buildMarker, buildMarkerCache, isInsideMarker } from "./shared.js";
+import { buildMarker, buildMarkerCache, isInsideMarker, isInsidePathContext } from "./shared.js";
 
 const PREFIX_PATTERNS: { prefix: string; name: string }[] = [
   { prefix: "ghp_", name: "GitHub Token" },
@@ -50,6 +50,12 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
       if (value.length >= prefix.length + 8) {
         if (!isInsideMarker(markerCache, idx, end)) {
           if (!matchesOverlapExisting(matches, idx, end)) {
+            // v0.1.4: skip matches inside path-like contexts so we never
+            // corrupt legitimate filename fragments shaped like vendor prefixes.
+            if (isInsidePathContext(text, idx, end)) {
+              searchFrom = idx + 1;
+              continue;
+            }
             matches.push({
               start: idx,
               end,

@@ -2,7 +2,7 @@
 // Erkennt hoch-entropy Strings in isolierten Tokens
 
 import type { Match, RedactionContext, LayerResult } from "../types.js";
-import { buildMarker, buildMarkerCache, isInsideMarker } from "./shared.js";
+import { buildMarker, buildMarkerCache, isInsideMarker, isInsidePathContext } from "./shared.js";
 
 /**
  * Calculate Shannon entropy in bits per character.
@@ -86,6 +86,10 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
 
     const entropy = shannonEntropy(value);
     if (entropy < minEntropy) continue;
+
+    // v0.1.4: skip matches inside path-like contexts so random alphanumeric
+    // filename fragments are not flagged as high-entropy secrets.
+    if (isInsidePathContext(text, start, end)) continue;
 
     matches.push({
       start,

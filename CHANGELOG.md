@@ -5,6 +5,77 @@ All notable changes to `pi-redact-all` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-07-30
+
+### Fixed (CRITICAL — two reported bugs)
+
+#### 1. Image payloads corrupted during redaction
+
+Multimodal provider requests (Anthropic `image.source.data`, OpenAI `image_url`,
+Google `inlineData`, generated-image `b64_json`, Pi internal `ImageContent.data`)
+were being corrupted in the `before_provider_request` hook. Layer 4 (entropy)
+matched the long base64 data as "High Entropy Token" and replaced it with a
+`[REDACTED:...]` marker, which the provider then rejected with HTTP 400:
+
+```
+invalid_request_error: invalid image content:
+decode image config: image: unknown format (2013)
+```
+
+The new `isProtectedImageKey()` heuristic in `before-provider.ts` inspects the
+sibling keys around a match and skips redaction when the surrounding structure
+looks like a multimodal envelope. The check is structural (not blanket-key),
+so ordinary `data` properties on unrelated payloads are still redacted.
+
+#### 2. Filenames redacted as if they were API keys
+
+Layer 1's `sk-[a-zA-Z0-9._\-]{20,}` pattern + Layer 4 entropy matched on long
+alphanumeric tokens that happened to live inside file paths or filenames.
+Reported offender: an Obsidian playbook file
+`zed-task-handle.md` becoming
+`zed-task-h***************[REDACTED:OpenAI/Anthropic API Key].md` after a
+write-tool-call.
+
+The new `isInsidePathContext()` heuristic in `shared.ts` suppresses all layer
+matches when the `[start, end)` span sits inside a path-like context:
+
+- Path separator (`/`, `\`) immediately before the match
+- Path separator within the next 20 chars (after stripping REDACTED markers
+  so our own marker text like `[REDACTED:OpenAI/Anthropic API Key]` doesn't
+  trigger via its embedded `/`)
+- File extension within the next 80 chars **or** at the tail of the match
+  itself (Layer 1 char class greedily eats `.md`, so the suffix may be
+  *inside* the match span)
+- Path-prefix cues (`path:`, `from`, `save`, `to`, `write`, `<path>` etc.)
+  immediately before the match
+
+Layer 1 (vendor), Layer 3 (prefix) and Layer 4 (entropy) all consult this
+heuristic. Real secrets in normal prose are still redacted — verified by
+10 negative tests.
+
+### Added
+
+- `isInsidePathContext()` in `src/layers/shared.ts`
+- `isProtectedImageKey()` in `src/hooks/before-provider.ts`
+- `test/image-payload-v0.1.4.test.mjs` — 10 regression tests covering
+  Anthropic, Pi, OpenAI Chat, OpenAI Responses, Google, image generation,
+  data-URI URLs, deeply-nested blocks, and text siblings.
+- `test/path-context-v0.1.4.test.mjs` — 12 regression tests covering the
+  reported filename bug, file-extension suffix, path separators, common
+  path-prefix cues, `<path>` tag cursors, and four negative tests
+  confirming real secrets in prose still redact.
+
+### Tests
+
+| Suite | Result |
+|-------|--------|
+| hooks-test | 21/21 |
+| image-payload-v0.1.4 | 10/10 |
+| path-context-v0.1.4 | 12/12 |
+| comprehensive-validation | 34/34 |
+| smoke-test | 8/8 |
+| **Total** | **85/85** |
+
 ## [0.1.3] - 2026-07-27
 
 ### Performance (CRITICAL)

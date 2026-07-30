@@ -15,6 +15,85 @@ export function buildMarker(value: string, type: string, preservePrefixChars = 4
 }
 
 /**
+ * File-extension heuristic. Matches a leading dot followed by 1-6 alphanumeric
+ * chars — `.md`, `.json`, `.ts`, `.docx`, `.tar.gz` (the trailing `.gz` is its
+ * own extension). Used as one of the path-context signals.
+ */
+const FILE_EXT_RE = /\.[a-z0-9]{1,6}(?=[^a-z0-9]|$)/i;
+
+/**
+ * Detects whether the [start, end) span in `text` is sitting inside a path-like
+ * context. Specifically, returns true when one or more of these is true:
+ *
+ *  - the char immediately before start is a path separator (`/`, `\`)
+ *  - the substring from start to the next 80 chars contains `/` or `\`
+ *    (a directory or filename anchor further ahead)
+ *  - within the 80 chars after end there's a file extension (`.md`, `.json`, ...)
+ *    followed by a non-alphanumeric character or EOL
+ *  - within the 60 chars before start there's a path-like prefix
+ *    (e.g. `path:`, `File:`, `Z.`, `Located at`, "to ", `dir/`, `<`)
+ *
+ * The heuristic is intentionally loose. False positives are bounded by the
+ * other redaction passes still running; missing real path-context matches
+ * would leave users with corrupted file paths (e.g. an OpenAI key signature
+ * inside an innocent filename being replaced with `[REDACTED:...]`).
+ *
+ * This is the v0.1.4 mitigation for the "redacted legitimate file path" bug
+ * where Layer 1 vendor + Layer 4 entropy matched on long base64-looking tokens
+ * that happened to be part of an Obsidian playbook name like
+ * `zed-task-handle.md` and turned it into `zed-task-h***[REDACTED:...].md`.
+ */
+export function isInsidePathContext(text: string, start: number, end: number): boolean {
+  const before = text.slice(Math.max(0, start - 60), start);
+  const rawAfter = text.slice(end, Math.min(text.length, end + 80));
+
+  // Strip any [REDACTED:...] marker bodies from the segment we look at AFTER the
+  // match. Without this, our own redaction marker text like `[REDACTED:OpenAI/
+  // Anthropic API Key]` would trigger the "path separator ahead" heuristic via the
+  // `/` in `OpenAI/Anthropic` and incorrectly mark every vendor match as path
+  // context. We strip the marker entirely and then add an extra space so the
+  // surrounding whitespace semantics stay usable.
+  const after = rawAfter.replace(/\[REDACTED[^\]]*\]/g, " ").trimStart();
+
+  // 1. Path separator immediately before the match — strongly indicates a path segment.
+  const lastChar = start > 0 ? text[start - 1] : "";
+  if (lastChar === "/" || lastChar === "\\") return true;
+
+  // 2. Path separator shortly after the match (in cleaned text only).
+  if (after.length > 0 && /[\\/]/.test(after.slice(0, 20))) return true;
+
+  // 3. File extension shortly after OR INSIDE the match (e.g.
+  //    `zed-task-sk-XYZ<match>.md`). Layer 1's char class `[a-zA-Z0-9._\-]`
+  //    greedily eats the trailing `.md`, so by the time we look at `after`
+  //    the `.json` is *inside* the match span. We therefore also check a wider
+  //    window forward of `end` and look for an extension-like suffix at the
+  //    match boundary itself.
+  if (after.length > 0 && FILE_EXT_RE.test(after)) return true;
+  // The match itself ends with `.<ext>` — peel that off and treat as path-context.
+  // Layer-1 only ever matches `.md`-style suffixes of lengths 1-6, so this is safe.
+  const tailWithinMatch = text.slice(Math.max(0, end - 7), end);
+  if (/\.[a-z0-9]{1,6}$/i.test(tailWithinMatch)) return true;
+
+  // 4. Path-prefix cues immediately before the match.
+  //    e.g. `path: zed-task-sk-XYZ...`, `to /home/foo/zed-task-sk-XYZ...`,
+  //    `Z. zed-task-sk-XYZ...`, `<path>zed-task-sk-XYZ...`,
+  //    `save sk-...`, `from sk-...`. We deliberately do NOT match generic
+  //    words like "token" / "secret" / "key" (they often precede a real secret
+  //    in user prose and would create false negatives).
+  if (/(?:path|file|filename|filepath|dir|loc|tgt|target)\s*:\s*$/i.test(before)) {
+    return true;
+  }
+  if (/\b(?:to|from|save|write|create|store|in|at|via|using)\s+$/i.test(before)) {
+    return true;
+  }
+  if (/<\s*\/?\s*(?:path|file|filename|filepath)\s*>\s*$/i.test(before)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Marker-Span-Cache: tracks existing [REDACTED:...] markers in the text.
  * Built ONCE per text via buildMarkerCache() — used by all layers via isInsideMarker().
  * This avoids the O(n) per-match scan that would make entropy layer O(n²).
