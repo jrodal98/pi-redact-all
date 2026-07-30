@@ -90,6 +90,19 @@ export function isInsidePathContext(text: string, start: number, end: number): b
     return true;
   }
 
+  // 5. Data-URL prefix: when a long high-entropy token sits *immediately* after
+  //    a `data:image/...;base64,` (or `data:application/...;base64,`) prefix in
+  //    the prior 60 chars, it's the base64 payload of an inline image or file.
+  //    Redacting those to `[REDACTED:High Entropy Token]` corrupts the payload
+  //    in the same way the Anthropic `invalid image content` 400 used to be
+  //    triggered. Real secrets in this context (an attacker pasting a key into
+  //    a data: URL) are still caught when the URL form passes the provider's
+  //    payload schema check upstream — this suppression only affects the
+  //    entropy layer's tendency to flag base64 alphabet text as suspicious.
+  if (/data:[a-z0-9.\/+-]+;base64,?$/i.test(before)) {
+    return true;
+  }
+
   return false;
 }
 

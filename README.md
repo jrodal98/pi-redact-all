@@ -193,10 +193,13 @@ Kompatibel mit `@spences10/pi-redact` — beide nutzen `[REDACTED:...]`-Prefix, 
 ```bash
 npm install
 npm run build                 # Compile TS → dist/
-npm run test                  # All 42 tests (8 smoke + 34 validation)
-node test/smoke-test.mjs      # Smoke tests only
-node test/hooks-test.mjs      # Hook schema tests
-node test/comprehensive-validation.mjs   # All tests
+npm run test                  # All 97 tests (8 smoke + 21 hooks + 34 validation + 10 image-payload + 12 path-context + 12 data-url)
+node test/smoke-test.mjs              # Smoke tests only
+node test/hooks-test.mjs              # Hook schema tests
+node test/comprehensive-validation.mjs # All hook + payload tests
+node test/image-payload-v0.1.4.test.mjs  # Image payload preservation
+node test/path-context-v0.1.4.test.mjs   # File-path / filename preservation
+node test/data-url-v0.1.5.test.mjs      # Data-URL base64 in text fields
 ```
 
 ### Test Coverage
@@ -204,6 +207,9 @@ node test/comprehensive-validation.mjs   # All tests
 - **8 smoke tests** — Each detection layer against representative input
 - **21 hook tests** — Schema preservation for all AgentMessage roles + in-place mutation
 - **34 validation tests** — All 8 ToolResultEvent variants, edge cases, performance benchmarks
+- **10 image-payload tests** (v0.1.4) — Anthropic/Pi/OpenAI/Google multimodal payload preservation
+- **12 path-context tests** (v0.1.4) — Filename / path-context preservation
+- **12 data-url tests** (v0.1.5) — Inline `data:image/...;base64,` payloads in text fields
 
 ### Release Process
 

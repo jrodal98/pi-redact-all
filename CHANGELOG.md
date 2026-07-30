@@ -5,6 +5,48 @@ All notable changes to `pi-redact-all` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-07-30
+
+### Fixed (CRITICAL — image base64 in text fields corrupted)
+
+When image binary data appeared in a TEXT field (e.g. a read-tool result with
+the binary in the text note, the output of `bash base64 img.png`, or any user
+message embedding `data:image/png;base64,XXX`), Layer 4 (entropy) matched the
+long high-entropy base64 token and replaced it with `[REDACTED:High Entropy Token]`.
+The provider then received a corrupted payload.
+
+The `isInsidePathContext()` heuristic in `src/layers/shared.ts` was extended
+to recognize that a long high-entropy base64 token preceded by a
+`data:image/...;base64,` (or `data:application/...;base64,`) prefix is the
+base64 payload of an inline image or file — not a leaked secret.
+
+This suppression is consulted by entropy (Layer 4), vendor (Layer 1) and
+prefix (Layer 3). Real secrets in surrounding prose (a leaked AWS key, a GitHub
+token, a PEM private key) are still redacted normally — verified by 5 negative
+tests in `test/data-url-v0.1.5.test.mjs`.
+
+### Added
+
+- `test/data-url-v0.1.5.test.mjs` — 12 regression tests covering:
+  - read-tool text note containing a `data:image/...;base64,` payload
+  - common MIME prefixes (`image/png`, `image/jpeg`, `image/webp`,
+    `image/svg+xml`, `application/octet-stream`, `application/pdf`)
+  - 4 negative tests confirming real secrets (`AWS Access Key`, `GitHub Token`,
+    `PEM Private Key`) in adjacent prose ARE redacted, and that high-entropy
+    random base64 WITHOUT a `data:` prefix IS still redacted as before.
+
+### Tests
+
+| Suite                          | Result |
+|--------------------------------|--------|
+| data-url-v0.1.5 (new)          | 12/12  |
+| hooks-test                     | 21/21  |
+| image-payload-v0.1.4           | 10/10  |
+| path-context-v0.1.4            | 12/12  |
+| comprehensive-validation       | 34/34  |
+| smoke-test                     |  8/8   |
+| **Total**                      | **97/97** |
+
 ## [0.1.4] - 2026-07-30
 
 ### Fixed (CRITICAL — two reported bugs)
