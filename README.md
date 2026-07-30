@@ -2,8 +2,8 @@
 
 [![npm version](https://img.shields.io/npm/v/pi-redact-all.svg)](https://www.npmjs.com/package/pi-redact-all)
 [![license: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-[![CI](https://github.com/steimbyte/pi-redact-all/actions/workflows/ci.yml/badge.svg)](https://github.com/steimbyte/pi-redact-all/actions/workflows/ci.yml)
-[![GitHub release](https://img.shields.io/github/v/release/steimbyte/pi-redact-all)](https://github.com/steimbyte/pi-redact-all/releases)
+[![CI](https://github.com/steimerbyte/pi-redact-all/actions/workflows/ci.yml/badge.svg)](https://github.com/steimerbyte/pi-redact-all/actions/workflows/ci.yml)
+[![GitHub release](https://img.shields.io/github/v/release/steimerbyte/pi-redact-all)](https://github.com/steimerbyte/pi-redact-all/releases)
 
 > **The secret scanner for Pi that catches what `@spences10/pi-redact` misses — including X.509 certificates.**
 
@@ -94,7 +94,7 @@ Optimized for large outputs (cat dumps, log files, certificates):
 pi install npm:pi-redact-all
 
 # From source (development)
-git clone https://github.com/steimbyte/pi-redact-all.git
+git clone https://github.com/steimerbyte/pi-redact-all.git
 cd pi-redact-all
 npm install
 npm run build

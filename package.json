@@ -38,19 +38,19 @@
     "extensions": [
       "./dist/index.js"
     ],
-    "image": "https://raw.githubusercontent.com/steimbyte/pi-redact-all/main/assets/preview.png"
+    "image": "https://raw.githubusercontent.com/steimerbyte/pi-redact-all/main/assets/preview.png"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/steimbyte/pi-redact-all.git"
+    "url": "git+https://github.com/steimerbyte/pi-redact-all.git"
   },
-  "homepage": "https://github.com/steimbyte/pi-redact-all#readme",
+  "homepage": "https://github.com/steimerbyte/pi-redact-all#readme",
   "bugs": {
-    "url": "https://github.com/steimbyte/pi-redact-all/issues"
+    "url": "https://github.com/steimerbyte/pi-redact-all/issues"
   },
   "author": {
     "name": "Benjamin Steimer",
-    "url": "https://github.com/steimbyte"
+    "url": "https://github.com/steimerbyte"
   },
   "devDependencies": {
     "typescript": "^5.5.0",
