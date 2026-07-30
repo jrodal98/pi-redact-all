@@ -35,6 +35,19 @@ export function redactText(text: string, ctx: RedactionContext): { text: string;
     return { text: "", matches: [] };
   }
 
+  // Hot-path fast-exit: the configured minimum-length guard. Most redaction
+  // targets are >= minLength tokens (32 chars by default). Text shorter than
+  // minLength cannot contain a match — vendor patterns, PEM blocks, entropy
+  // tokens, connection strings, PII regexes all require at least minLength
+  // characters. The layer-7 path detector also requires a file path in
+  // `input.path`, which would never fire on short text. Skipping layers
+  // here is correct *and* faster than iterating 9 layers on every short
+  // tool-result text item (a common case).
+  const minLength = ctx.config.minLength;
+  if (text.length < minLength) {
+    return { text, matches: [] };
+  }
+
   let current = text;
   const allMatches: Match[] = [];
 

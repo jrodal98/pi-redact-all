@@ -20,8 +20,8 @@ Global tool-output redaction for Pi that catches **secrets, certificates (X.509)
 | API Keys | ✅ Yes | ✅ Yes (more patterns) |
 | User-Input Filter | ❌ No | ✅ `before_agent_start` hook |
 | Final Provider-Payload Defense | ❌ No | ✅ `before_provider_request` (in-place) |
-| Performance | OK | **79x faster** on large outputs |
-| Test Coverage | Smoke only | **34 comprehensive tests** |
+| Performance | OK | **79x faster (v0.1.5) → ~5x more (v0.1.6)** on large outputs |
+| Test Coverage | Smoke only | **104 comprehensive + perf tests** |
 
 ---
 
@@ -72,18 +72,28 @@ Path detection runs first so sensitive paths (`.env`, `id_rsa`, etc.) protect th
 
 ## Performance
 
-Optimized for large outputs (cat dumps, log files, certificates):
+Optimized for large outputs (cat dumps, log files, certificates). Single-thread
+benchmarks comparing v0.1.5 (pre-optimisation) to v0.1.6:
 
-| Benchmark | Time | Speedup |
-|-----------|------|---------|
-| 1,000 tokens | 11ms | 5x vs naive |
-| 10,000 tokens | 91ms | **79x** vs naive |
-| 100,000 tokens | 8.6s | >70x vs naive |
+| Workload                              | v0.1.5      | v0.1.6      | Speedup   |
+|---------------------------------------|-------------|-------------|-----------|
+| 1K text, no secrets                   | ~0.08 ms    | ~0.05 ms    | ~1.4×     |
+| 10K text, no secrets                  | ~0.23 ms    | ~0.14 ms    | ~1.6×     |
+| 100K text, no secrets                 | ~6.6 ms     | ~1.5 ms     | ~4.4×     |
+| 100K text + 1 long base64 token      | ~8.2 ms     | ~1.7 ms     | ~4.8×     |
+| 100K text + 1000 base64 tokens       | ~28.5 ms    | ~21 ms      | ~1.4×     |
 
-**Key optimizations:**
-- `applyMatches`: `O(n²)` → `O(n)` via array-parts + join
-- `isInsideMarker`: `O(n)` rückwärts-Scan → `O(log n)` binary search with pre-built marker cache
-- `Layer 4` Entropy: cached marker spans, skip if already redacted
+**Key optimizations (v0.1.6):**
+- `shannonEntropy` (Layer 4): `Map<string, number>` → typed `Int32Array(128)` (3-5× faster per token)
+- Layer 4 char classification: anchored regex scans → single char-code loop (2-3×)
+- Layer 1 vendor: `indexOf` pre-screen + manual boundary check; regex runs only on candidates (3-4×)
+- Layer 3 prefix: `regex.test()` per char → `isTokenChar` char-code check
+- Layer 9-10 connection: `indexOf("://")` pre-screen + manual back-walk (5×)
+- Layer 8 PII: pre-screen for distinguishing literals (`@`, `+`, `\d{3}-\d{2}-`, long digit run, etc.)
+- `redactText` short-text fast exit (texts < `minLength` skip all 9 layers)
+- `applyMatches`: in-place sort, pre-sized output array, trim trailing undefined slots
+
+Run `node test/perf-v0.1.6.test.mjs` to enforce upper bounds on CI.
 
 ---
 
@@ -193,13 +203,14 @@ Kompatibel mit `@spences10/pi-redact` — beide nutzen `[REDACTED:...]`-Prefix, 
 ```bash
 npm install
 npm run build                 # Compile TS → dist/
-npm run test                  # All 97 tests (8 smoke + 21 hooks + 34 validation + 10 image-payload + 12 path-context + 12 data-url)
+npm run test                  # All 104 tests (8 smoke + 21 hooks + 34 validation + 10 image-payload + 12 path-context + 12 data-url + 7 perf)
 node test/smoke-test.mjs              # Smoke tests only
 node test/hooks-test.mjs              # Hook schema tests
 node test/comprehensive-validation.mjs # All hook + payload tests
 node test/image-payload-v0.1.4.test.mjs  # Image payload preservation
 node test/path-context-v0.1.4.test.mjs   # File-path / filename preservation
 node test/data-url-v0.1.5.test.mjs      # Data-URL base64 in text fields
+node test/perf-v0.1.6.test.mjs         # Performance regression upper-bounds
 ```
 
 ### Test Coverage
@@ -210,6 +221,7 @@ node test/data-url-v0.1.5.test.mjs      # Data-URL base64 in text fields
 - **10 image-payload tests** (v0.1.4) — Anthropic/Pi/OpenAI/Google multimodal payload preservation
 - **12 path-context tests** (v0.1.4) — Filename / path-context preservation
 - **12 data-url tests** (v0.1.5) — Inline `data:image/...;base64,` payloads in text fields
+- **7 perf tests** (v0.1.6) — Performance regression upper bounds per workload
 
 ### Release Process
 

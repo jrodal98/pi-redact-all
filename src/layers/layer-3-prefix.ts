@@ -29,6 +29,18 @@ const PREFIX_PATTERNS: { prefix: string; name: string }[] = [
   { prefix: "eyJ", name: "JWT" },
 ];
 
+// Char-code check for `[A-Za-z0-9_-]` — replaces a per-char regex test
+// (`/[A-Za-z0-9_-]/.test(c)`) which is way slower than a single charCodeAt.
+function isTokenChar(code: number): boolean {
+  return (
+    (code >= 0x30 && code <= 0x39) || // 0-9
+    (code >= 0x41 && code <= 0x5a) || // A-Z
+    (code >= 0x61 && code <= 0x7a) || // a-z
+    code === 0x5f ||                  // _
+    code === 0x2d                      // -
+  );
+}
+
 export function apply(text: string, ctx: RedactionContext): LayerResult {
   const matches: Match[] = [];
 
@@ -37,17 +49,18 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
 
   for (const { prefix, name } of PREFIX_PATTERNS) {
     let searchFrom = 0;
+    const minLen = prefix.length + 8;
     while (true) {
       const idx = text.indexOf(prefix, searchFrom);
       if (idx === -1) break;
-      // Find end of token (alphanumeric + - _)
-      let end = idx;
-      while (end < text.length && /[A-Za-z0-9_\-]/.test(text[end])) {
+      // Find end of token via charCode loop (no regex per char)
+      let end = idx + prefix.length;
+      while (end < text.length && isTokenChar(text.charCodeAt(end))) {
         end++;
       }
-      const value = text.slice(idx, end);
-      // Heuristic: token must be at least prefix + 8 chars
-      if (value.length >= prefix.length + 8) {
+      const tokenLen = end - idx;
+      if (tokenLen >= minLen) {
+        const value = text.slice(idx, end);
         if (!isInsideMarker(markerCache, idx, end)) {
           if (!matchesOverlapExisting(matches, idx, end)) {
             // v0.1.4: skip matches inside path-like contexts so we never

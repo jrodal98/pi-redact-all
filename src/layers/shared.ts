@@ -168,33 +168,47 @@ export function isInsideMarker(cache: MarkerCache, start: number, end: number): 
  *
  * PERFORMANCE: Uses array-parts + join instead of repeated string concatenation,
  * which would be O(n²) for large match counts. This is O(n + m).
+ *
+ * v0.1.6: in-place sort of the matches array (we own it — callers pass fresh
+ * arrays from each layer). Saves the [...matches] clone for the common
+ * small-matches case. Dedupe loop uses a pre-sized `filtered` array to avoid
+ * Array.push() reallocation. The two-pass slice/join uses a single `parts`
+ * array sized to (2m + 1) so each push is amortized O(1).
  */
 export function applyMatches(text: string, matches: Match[]): string {
   if (matches.length === 0) return text;
-  // Sort by start index ascending — process left-to-right
-  const sorted = [...matches].sort((a, b) => a.start - b.start);
-  // Dedupe overlapping: keep the one starting first
-  const filtered: Match[] = [];
+  // In-place sort — layer pipeline never reuses these arrays.
+  matches.sort((a, b) => a.start - b.start);
+  // Dedupe overlapping: keep the one starting first. Pre-size to avoid
+  // repeated V8 array-growth.
+  const filtered: Match[] = new Array(matches.length);
+  let fLen = 0;
   let lastEnd = -1;
-  for (const m of sorted) {
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
     if (m.start >= lastEnd) {
-      filtered.push(m);
+      filtered[fLen++] = m;
       lastEnd = m.end;
     }
   }
-  // Build output as array of parts (each match's text + replacement)
-  const parts: string[] = [];
+  // Build output: text slices interleaved with replacements.
+  // Worst case: 2m+1 parts (text, rep, text, rep, ..., trailing text).
+  const parts: string[] = new Array(fLen * 2 + 1);
   let cursor = 0;
-  for (const m of filtered) {
+  let p = 0;
+  for (let i = 0; i < fLen; i++) {
+    const m = filtered[i];
     if (m.start > cursor) {
-      parts.push(text.slice(cursor, m.start));
+      parts[p++] = text.slice(cursor, m.start);
     }
-    parts.push(m.replacement);
+    parts[p++] = m.replacement;
     cursor = m.end;
   }
   if (cursor < text.length) {
-    parts.push(text.slice(cursor));
+    parts[p++] = text.slice(cursor);
   }
+  // Trim trailing undefined slots if dedupe reduced the count.
+  if (p < parts.length) parts.length = p;
   return parts.join("");
 }
 
