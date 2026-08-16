@@ -1,5 +1,7 @@
 node_modules/
-dist/
+# dist/ is intentionally committed so `pi install git:...` works without
+# needing TypeScript at install time (pi runs `npm install --omit=dev`,
+# which skips devDependencies like typescript).
 *.log
 .DS_Store
 .env
