@@ -59,8 +59,21 @@ export function isInsidePathContext(text: string, start: number, end: number): b
   const lastChar = start > 0 ? text[start - 1] : "";
   if (lastChar === "/" || lastChar === "\\") return true;
 
+  // Delimiter guard for the look-ahead checks below (rules 2 & 3). If the
+  // token is immediately closed by a quote/bracket/paren, a following URL's
+  // "/" or ".sh" belongs to that URL, not to the token. Without this,
+  // `Bearer tk_..." https://ntfy.sh/...` was incorrectly suppressed because
+  // \verb|after| contained `/` and `.sh` from the URL (e.g. case4: curl
+  // -H "Authorization: Bearer tk_..." https://ntfy.sh/mytopic).
+  const immediateAfter = rawAfter[0] ?? "";
+  const isDelimited = immediateAfter === '"' || immediateAfter === "'" || immediateAfter === "`" || immediateAfter === ">" || immediateAfter === "]" || immediateAfter === ")";
+
   // 2. Path separator shortly after the match (in cleaned text only).
-  if (after.length > 0 && /[\\/]/.test(after.slice(0, 20))) return true;
+  // Only when not delimited — otherwise this is a separate URL/path.
+  // We require the separator to be at the start of \verb|after| (i.e. the token
+  // is directly followed by `/notes.md`), not merely somewhere within 20 chars
+  // (which would catch a later URL like `" https://foo/bar`).
+  if (!isDelimited && after.length > 0 && (after.startsWith("/") || after.startsWith("\\"))) return true;
 
   // 3. File extension shortly after OR INSIDE the match (e.g.
   //    `zed-task-sk-XYZ<match>.md`). Layer 1's char class `[a-zA-Z0-9._\-]`
@@ -68,7 +81,7 @@ export function isInsidePathContext(text: string, start: number, end: number): b
   //    the `.json` is *inside* the match span. We therefore also check a wider
   //    window forward of `end` and look for an extension-like suffix at the
   //    match boundary itself.
-  if (after.length > 0 && FILE_EXT_RE.test(after)) return true;
+  if (!isDelimited && after.length > 0 && FILE_EXT_RE.test(after)) return true;
   // The match itself ends with `.<ext>` — peel that off and treat as path-context.
   // Layer-1 only ever matches `.md`-style suffixes of lengths 1-6, so this is safe.
   const tailWithinMatch = text.slice(Math.max(0, end - 7), end);
