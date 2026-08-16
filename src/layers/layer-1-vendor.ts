@@ -61,6 +61,8 @@ const PATTERNS: Pattern[] = [
   { name: "Brave API Key", prefix: "BSA", tail: /^BSA[A-Z0-9]{20,}\b/, wordBoundary: true },
   // Firecrawl
   { name: "Firecrawl API Key", prefix: "fc-", tail: /^fc-[a-f0-9]{32}\b/, wordBoundary: true },
+  // ntfy (https://docs.ntfy.sh/publish/#access-tokens)
+  { name: "ntfy Token", prefix: "tk_", tail: /^tk_[A-Za-z0-9]{20,}\b/, wordBoundary: true },
 ];
 
 /** A small char-class check used instead of `\\b` — much faster than the

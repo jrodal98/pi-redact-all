@@ -35,16 +35,16 @@ export function redactText(text: string, ctx: RedactionContext): { text: string;
     return { text: "", matches: [] };
   }
 
-  // Hot-path fast-exit: the configured minimum-length guard. Most redaction
-  // targets are >= minLength tokens (32 chars by default). Text shorter than
-  // minLength cannot contain a match — vendor patterns, PEM blocks, entropy
-  // tokens, connection strings, PII regexes all require at least minLength
-  // characters. The layer-7 path detector also requires a file path in
-  // `input.path`, which would never fire on short text. Skipping layers
-  // here is correct *and* faster than iterating 9 layers on every short
-  // tool-result text item (a common case).
-  const minLength = ctx.config.minLength;
-  if (text.length < minLength) {
+  // Hot-path fast-exit: skip obviously-too-short texts. The smallest vendor
+  // token in the registry is ~11 chars (e.g. npm_ + 8, BSA + 20, fc- + 32,
+  // tk_ + 20). A threshold of 16 preserves the win on tiny tool outputs
+  // ("ok", "success", short file listings) while ensuring vendor/ntfy
+  // tokens of 20-31 chars are still scanned — the previous guard used
+  // `minLength` (32 by default) which incorrectly blocked standalone tk_
+  // / AKIA / sk- tokens that are shorter than the entropy layer's threshold.
+  // Per-layer length checks (entropy's minLength, pii regexes, etc.) still
+  // gate the expensive paths; this is just the cheap global short-circuit.
+  if (text.length < 16) {
     return { text, matches: [] };
   }
 
