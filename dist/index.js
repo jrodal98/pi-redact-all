@@ -194,15 +194,30 @@ export default function (pi) {
     });
     pi.registerCommand("redact-all-stats", {
         description: "Show pi-redact-all session statistics",
-        handler: () => formatStats(stats),
+        handler: async (_args, ctx) => {
+            const text = formatStats(stats);
+            if (ctx?.ui?.notify)
+                ctx.ui.notify(text, "info");
+            return text;
+        },
     });
     pi.registerCommand("redact-all-config", {
         description: "Show current pi-redact-all configuration",
-        handler: () => JSON.stringify(config, null, 2),
+        handler: async (_args, ctx) => {
+            const text = JSON.stringify(config, null, 2);
+            if (ctx?.ui?.notify)
+                ctx.ui.notify(text, "info");
+            return text;
+        },
     });
     pi.registerCommand("redact-all-blocklist", {
         description: "Show actively blocklisted regex, literals, env vars and dotenv files (masked)",
-        handler: () => formatBlocklistReport(),
+        handler: async (_args, ctx) => {
+            const text = formatBlocklistReport();
+            if (ctx?.ui?.notify)
+                ctx.ui.notify(text, "info");
+            return text;
+        },
     });
 }
 //# sourceMappingURL=index.js.map
