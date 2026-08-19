@@ -185,6 +185,7 @@ function applyDotenvBlocklist(config) {
     const hasDiscover = discover.length > 0;
     if (!hasManual && !hasDiscover) {
         lastDotenvDebug = {
+            manualLiterals: [...(config.blocklistLiteral ?? [])],
             manualPatterns: [],
             discoverStrategies: [],
             discoveredFiles: [],
@@ -203,6 +204,7 @@ function applyDotenvBlocklist(config) {
     const allPatterns = [...manual, ...discovered];
     const expandedManual = manual.flatMap((p) => expandDotenvPattern(p));
     const debug = {
+        manualLiterals: [...(config.blocklistLiteral ?? [])],
         manualPatterns: [...manual],
         discoverStrategies: [...discover],
         discoveredFiles: [...discovered],
@@ -364,6 +366,7 @@ function loadDotenvValuesWithDebug(patterns, excludeKeys) {
                 continue;
             }
             const parsed = parseDotenvFile(file);
+            const entries = [];
             const keys = [];
             const skippedKeys = [];
             let added = 0;
@@ -382,10 +385,11 @@ function loadDotenvValuesWithDebug(patterns, excludeKeys) {
                     continue;
                 }
                 out.push(v);
+                entries.push({ key: k, value: v });
                 keys.push(k);
                 added++;
             }
-            loadedFiles.push({ path: file, keys, valuesCount: added, skippedKeys });
+            loadedFiles.push({ path: file, entries, keys, valuesCount: added, skippedKeys });
         }
     }
     return { values: [...new Set(out)], loadedFiles, skippedExamples, placeholderSkipped, shortSkipped };

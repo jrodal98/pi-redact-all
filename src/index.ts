@@ -52,34 +52,66 @@ function formatBlocklistReport(): string {
   lines.push(``);
 
   const literalList = cfg.blocklistLiteral ?? [];
-  const dotenvCount = dotenvDebug?.totalValues ?? 0;
-  const manualLiteralCount = literalList.length - dotenvCount;
-  lines.push(`### blocklistLiteral (${literalList.length}) — ${manualLiteralCount} manual + ${dotenvCount} from dotenv`);
-  if (literalList.length === 0) lines.push(`(none)`);
-  else {
-    const toShow = literalList.slice(0, 20);
-    for (const v of toShow) {
-      const masked = maskValue(v, cfg.preservePrefixChars);
-      lines.push(`- \`${masked}\``);
+  const manualLiterals = dotenvDebug?.manualLiterals ?? literalList;
+  const manualLiteralSet = new Set(manualLiterals);
+  const envList = cfg.blocklistEnv ?? [];
+  const resolvedEnv = new Map<string, string>();
+  for (const name of envList) {
+    try {
+      const value = process.env[name];
+      if (value) resolvedEnv.set(name, value);
+    } catch {}
+  }
+  const envNamesByValue = new Map<string, string[]>();
+  for (const [name, value] of resolvedEnv) {
+    const names = envNamesByValue.get(value) ?? [];
+    names.push(name);
+    envNamesByValue.set(value, names);
+  }
+  const dotenvSourcesByValue = new Map<string, { path: string; key: string }[]>();
+  for (const file of dotenvDebug?.loadedFiles ?? []) {
+    for (const entry of file.entries) {
+      const sources = dotenvSourcesByValue.get(entry.value) ?? [];
+      sources.push({ path: file.path, key: entry.key });
+      dotenvSourcesByValue.set(entry.value, sources);
     }
-    if (literalList.length > 20) lines.push(`- … and ${literalList.length - 20} more (use /redact-all-config for raw)`);
+  }
+
+  lines.push(`### Configured blocklistLiteral (${manualLiterals.length})`);
+  if (manualLiterals.length === 0) lines.push(`(none)`);
+  else {
+    for (const value of manualLiterals.slice(0, 20)) {
+      const dotenvSources = dotenvSourcesByValue.get(value) ?? [];
+      const envNames = envNamesByValue.get(value) ?? [];
+      const overlaps = [
+        dotenvSources.length ? `dotenv: ${dotenvSources.map((s) => `${s.key} in ${s.path}`).join(", ")}` : "",
+        envNames.length ? `blocklistEnv: ${envNames.join(", ")}` : "",
+      ].filter(Boolean);
+      lines.push(`- \`${maskValue(value, cfg.preservePrefixChars)}\`${overlaps.length ? ` (also ${overlaps.join("; ")})` : ""}`);
+    }
+    if (manualLiterals.length > 20) lines.push(`- … and ${manualLiterals.length - 20} more masked values`);
   }
   lines.push(``);
 
-  const envList = cfg.blocklistEnv ?? [];
-  lines.push(`### blocklistEnv (${envList.length}) — env var names whose *values* are redacted`);
+  lines.push(`### blocklistEnv (${envList.length} configured, ${resolvedEnv.size} resolved)`);
   if (envList.length === 0) lines.push(`(none) — e.g. "blocklistEnv": ["MY_SECRET_TOKEN"]`);
   else {
     for (const name of envList) {
-      let val: string | undefined;
-      try { val = process.env[name]; } catch {}
-      if (val) lines.push(`- \`${name}\` → \`${maskValue(val)}\` ✓ resolved (${val.length} chars)`);
-      else lines.push(`- \`${name}\` → (not set / empty) ✗ unresolved`);
+      const value = resolvedEnv.get(name);
+      if (!value) {
+        lines.push(`- \`${name}\` → (not set / empty) ✗ unresolved`);
+        continue;
+      }
+      const dotenvSources = dotenvSourcesByValue.get(value) ?? [];
+      const overlap = dotenvSources.length
+        ? ` (also dotenv: ${dotenvSources.map((s) => `${s.key} in ${s.path}`).join(", ")})`
+        : manualLiteralSet.has(value) ? ` (also configured blocklistLiteral)` : "";
+      lines.push(`- \`${name}\` → \`${maskValue(value)}\` ✓ resolved${overlap}`);
     }
   }
   lines.push(``);
 
-  lines.push(`### blocklistDotenv — load .env *values* into blocklistLiteral`);
+  lines.push(`### blocklistDotenv (${dotenvDebug?.totalValues ?? 0} unique values)`);
   lines.push(`- patterns: ${cfg.blocklistDotenv?.length ? cfg.blocklistDotenv.map((p) => `\`${p}\``).join(", ") : "(none)"}`);
   lines.push(`- discover: ${cfg.blocklistDotenvDiscover?.length ? cfg.blocklistDotenvDiscover.join(", ") : "(none)"} (options: gitRoot, cwd, nextToExample)`);
   lines.push(`- excludeKeys: ${cfg.blocklistDotenvExcludeKeys?.length ? cfg.blocklistDotenvExcludeKeys.join(", ") : "(none)"} (e.g. TZ, STORE_MODEL_IN_DB)`);
@@ -89,15 +121,42 @@ function formatBlocklistReport(): string {
     lines.push(`- loaded files (${dotenvDebug.loadedFiles.length}):`);
     if (dotenvDebug.loadedFiles.length === 0) lines.push(`  (none)`);
     else {
-      for (const f of dotenvDebug.loadedFiles) {
-        lines.push(`  - \`${f.path}\`: ${f.valuesCount} values, keys [${f.keys.slice(0,5).join(", ")}${f.keys.length>5?` +${f.keys.length-5} more`:""}]${f.skippedKeys.length ? ` (skipped keys: ${f.skippedKeys.join(", ")})` : ""}`);
+      for (const file of dotenvDebug.loadedFiles) {
+        lines.push(`  - \`${file.path}\` (${file.valuesCount} values)`);
+        for (const entry of file.entries) {
+          const envNames = envNamesByValue.get(entry.value) ?? [];
+          const overlaps = [
+            envNames.length ? `also blocklistEnv: ${envNames.join(", ")}` : "",
+            manualLiteralSet.has(entry.value) ? `also configured blocklistLiteral` : "",
+          ].filter(Boolean);
+          lines.push(`    - \`${entry.key}\` → \`${maskValue(entry.value, cfg.preservePrefixChars)}\`${overlaps.length ? ` (${overlaps.join("; ")})` : ""}`);
+        }
+        if (file.skippedKeys.length) lines.push(`    - skipped keys: ${file.skippedKeys.join(", ")}`);
       }
     }
     if (dotenvDebug.skippedExampleFiles.length) lines.push(`- skipped example files: ${dotenvDebug.skippedExampleFiles.map((p) => `\`${p}\``).join(", ")}`);
-    lines.push(`- total values added: ${dotenvDebug.totalValues} (placeholder skipped: ${dotenvDebug.placeholderSkipped}, short <2 skipped: ${dotenvDebug.shortSkipped})`);
+    lines.push(`- placeholder skipped: ${dotenvDebug.placeholderSkipped}; short <2 skipped: ${dotenvDebug.shortSkipped}`);
   } else {
     lines.push(`- (no dotenv debug — no dotenv config)`);
   }
+  lines.push(``);
+
+  const dotenvValues = new Set(dotenvSourcesByValue.keys());
+  const resolvedEnvValues = new Set(resolvedEnv.values());
+  const sourceValues = new Set([...manualLiterals, ...dotenvValues, ...resolvedEnvValues]);
+  let overlapCount = 0;
+  for (const value of sourceValues) {
+    const sources = Number(manualLiteralSet.has(value)) + Number(dotenvValues.has(value)) + Number(resolvedEnvValues.has(value));
+    if (sources > 1) overlapCount++;
+  }
+  lines.push(`### Effective custom matchers`);
+  lines.push(`- regex patterns: ${regexList.length}`);
+  lines.push(`- configured literal values: ${manualLiterals.length}`);
+  lines.push(`- dotenv literal values: ${dotenvValues.size}`);
+  lines.push(`- runtime env values: ${resolvedEnvValues.size} resolved / ${envList.length} configured`);
+  lines.push(`- unique values across literal/env sources: ${sourceValues.size}`);
+  lines.push(`- values present in multiple sources: ${overlapCount}`);
+  lines.push(`- effective blocklistLiteral size: ${literalList.length} (dotenv values use literal matching internally)`);
   lines.push(``);
 
   lines.push(`### allowlist (suppressions)`);
@@ -105,7 +164,7 @@ function formatBlocklistReport(): string {
   lines.push(`- allowlistLiteral (${cfg.allowlistLiteral.length}): ${cfg.allowlistLiteral.length ? cfg.allowlistLiteral.slice(0,10).map((v) => `\`${maskValue(v)}\``).join(", ") : "(none)"}`);
   lines.push(`- allowlistEnv (${cfg.allowlistEnv.length}): ${cfg.allowlistEnv.length ? cfg.allowlistEnv.join(", ") : "(none)"}`);
   lines.push(``);
-  lines.push(`_Tip: /redact-all-config shows raw JSON (values unmasked). /redact-all-blocklist masks values. Values from dotenv are already merged into blocklistLiteral._`);
+  lines.push(`_Tip: /redact-all-config shows raw JSON (values unmasked). This report is source-aware and masked; dotenv values use literal matching internally but are attributed to their file and key above._`);
   return lines.join("\n");
 }
 

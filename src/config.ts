@@ -49,11 +49,18 @@ let lastDotenvDebug: DotenvDebug | null = null;
 let lastConfigPaths: { global: string | null; project: string | null; usedProject: string | null } = { global: null, project: null, usedProject: null };
 
 export interface DotenvDebug {
+  manualLiterals: string[];
   manualPatterns: string[];
   discoverStrategies: string[];
   discoveredFiles: string[];
   expandedManualFiles: string[];
-  loadedFiles: { path: string; keys: string[]; valuesCount: number; skippedKeys: string[] }[];
+  loadedFiles: {
+    path: string;
+    entries: { key: string; value: string }[];
+    keys: string[];
+    valuesCount: number;
+    skippedKeys: string[];
+  }[];
   skippedExampleFiles: string[];
   excludedKeys: string[];
   totalValues: number;
@@ -202,6 +209,7 @@ function applyDotenvBlocklist(config: Config): Config {
   const hasDiscover = discover.length > 0;
   if (!hasManual && !hasDiscover) {
     lastDotenvDebug = {
+      manualLiterals: [...(config.blocklistLiteral ?? [])],
       manualPatterns: [],
       discoverStrategies: [],
       discoveredFiles: [],
@@ -220,6 +228,7 @@ function applyDotenvBlocklist(config: Config): Config {
   const allPatterns = [...manual, ...discovered];
   const expandedManual = manual.flatMap((p) => expandDotenvPattern(p));
   const debug: DotenvDebug = {
+    manualLiterals: [...(config.blocklistLiteral ?? [])],
     manualPatterns: [...manual],
     discoverStrategies: [...discover],
     discoveredFiles: [...discovered],
@@ -333,10 +342,28 @@ function loadDotenvValues(patterns: string[], excludeKeys: Set<string>): string[
   return values;
 }
 
-function loadDotenvValuesWithDebug(patterns: string[], excludeKeys: Set<string>): { values: string[]; loadedFiles: { path: string; keys: string[]; valuesCount: number; skippedKeys: string[] }[]; skippedExamples: string[]; placeholderSkipped: number; shortSkipped: number } {
+function loadDotenvValuesWithDebug(patterns: string[], excludeKeys: Set<string>): {
+  values: string[];
+  loadedFiles: {
+    path: string;
+    entries: { key: string; value: string }[];
+    keys: string[];
+    valuesCount: number;
+    skippedKeys: string[];
+  }[];
+  skippedExamples: string[];
+  placeholderSkipped: number;
+  shortSkipped: number;
+} {
   const out: string[] = [];
   const seenFiles = new Set<string>();
-  const loadedFiles: { path: string; keys: string[]; valuesCount: number; skippedKeys: string[] }[] = [];
+  const loadedFiles: {
+    path: string;
+    entries: { key: string; value: string }[];
+    keys: string[];
+    valuesCount: number;
+    skippedKeys: string[];
+  }[] = [];
   const skippedExamples: string[] = [];
   let placeholderSkipped = 0;
   let shortSkipped = 0;
@@ -355,6 +382,7 @@ function loadDotenvValuesWithDebug(patterns: string[], excludeKeys: Set<string>)
         if (!stat.isFile()) continue;
       } catch { continue; }
       const parsed = parseDotenvFile(file);
+      const entries: { key: string; value: string }[] = [];
       const keys: string[] = [];
       const skippedKeys: string[] = [];
       let added = 0;
@@ -373,10 +401,11 @@ function loadDotenvValuesWithDebug(patterns: string[], excludeKeys: Set<string>)
           continue;
         }
         out.push(v);
+        entries.push({ key: k, value: v });
         keys.push(k);
         added++;
       }
-      loadedFiles.push({ path: file, keys, valuesCount: added, skippedKeys });
+      loadedFiles.push({ path: file, entries, keys, valuesCount: added, skippedKeys });
     }
   }
   return { values: [...new Set(out)], loadedFiles, skippedExamples, placeholderSkipped, shortSkipped };

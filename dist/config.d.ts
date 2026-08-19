@@ -1,12 +1,17 @@
 import type { Config } from "./types.js";
 export declare const DEFAULT_CONFIG: Config;
 export interface DotenvDebug {
+    manualLiterals: string[];
     manualPatterns: string[];
     discoverStrategies: string[];
     discoveredFiles: string[];
     expandedManualFiles: string[];
     loadedFiles: {
         path: string;
+        entries: {
+            key: string;
+            value: string;
+        }[];
         keys: string[];
         valuesCount: number;
         skippedKeys: string[];
