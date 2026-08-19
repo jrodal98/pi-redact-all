@@ -1,4 +1,4 @@
-import type { Match } from "../types.js";
+import type { Match, RedactionContext } from "../types.js";
 /**
  * Build a redaction marker like: `AKIA****************[REDACTED:AWS Access Key]`
  * Preserves a short prefix for context, fills middle with asterisks, appends marker.
@@ -66,5 +66,7 @@ export declare function isInsideExistingMarker(text: string, start: number, end:
  * Check whether the given [start, end) span overlaps any existing match in the list.
  * Uses sorted-array binary search for O(log n) performance.
  */
+export declare function isAllowlisted(value: string, ctx: RedactionContext): boolean;
+export declare function isAllowlistedLiteralOrEnv(value: string, ctx: RedactionContext): boolean;
 export declare function hasOverlap(sortedMatches: Match[], start: number, end: number): boolean;
 //# sourceMappingURL=shared.d.ts.map

@@ -50,8 +50,12 @@ export function isInsidePathContext(text, start, end) {
     const after = rawAfter.replace(/\[REDACTED[^\]]*\]/g, " ").trimStart();
     // 1. Path separator immediately before the match — strongly indicates a path segment.
     const lastChar = start > 0 ? text[start - 1] : "";
-    if (lastChar === "/" || lastChar === "\\")
-        return true;
+    if (lastChar === "/" || lastChar === "\\") {
+        const charBeforeSlash = start > 1 ? text[start - 2] : "";
+        const isIsolatedSlash = !charBeforeSlash || charBeforeSlash === " " || charBeforeSlash === "\n" || charBeforeSlash === "\t" || charBeforeSlash === '"' || charBeforeSlash === "'" || charBeforeSlash === "`";
+        if (!isIsolatedSlash)
+            return true;
+    }
     // Delimiter guard for the look-ahead checks below (rules 2 & 3). If the
     // token is immediately closed by a quote/bracket/paren, a following URL's
     // "/" or ".sh" belongs to that URL, not to the token. Without this,
@@ -65,8 +69,11 @@ export function isInsidePathContext(text, start, end) {
     // We require the separator to be at the start of \verb|after| (i.e. the token
     // is directly followed by `/notes.md`), not merely somewhere within 20 chars
     // (which would catch a later URL like `" https://foo/bar`).
-    if (!isDelimited && after.length > 0 && (after.startsWith("/") || after.startsWith("\\")))
-        return true;
+    if (!isDelimited && after.length > 0 && (after[0] === "/" || after[0] === "\\")) {
+        const next = after[1] ?? "";
+        if (next && /[A-Za-z0-9._-]/.test(next))
+            return true;
+    }
     // 3. File extension shortly after OR INSIDE the match (e.g.
     //    `zed-task-sk-XYZ<match>.md`). Layer 1's char class `[a-zA-Z0-9._\-]`
     //    greedily eats the trailing `.md`, so by the time we look at `after`
@@ -104,8 +111,23 @@ export function isInsidePathContext(text, start, end) {
     //    a data: URL) are still caught when the URL form passes the provider's
     //    payload schema check upstream — this suppression only affects the
     //    entropy layer's tendency to flag base64 alphabet text as suspicious.
-    if (/data:[a-z0-9.\/+-]+;base64,?$/i.test(before)) {
+    if (/data:[a-z0-9.\/+-]+;base64,/i.test(before)) {
         return true;
+    }
+    {
+        const largeBefore = text.slice(Math.max(0, start - 3000), start);
+        const idx = largeBefore.lastIndexOf(";base64,");
+        if (idx !== -1) {
+            const prefixStart = largeBefore.lastIndexOf("data:", idx);
+            if (prefixStart !== -1) {
+                const gap = largeBefore.slice(idx + 8);
+                if (gap.length < 2500 && /^[A-Za-z0-9+\/\-_= \n\r\t]*$/.test(gap)) {
+                    const prefixCandidate = largeBefore.slice(prefixStart, idx + 8);
+                    if (/^data:[a-z0-9.\/+-]+;base64,$/i.test(prefixCandidate))
+                        return true;
+                }
+            }
+        }
     }
     return false;
 }
@@ -231,6 +253,75 @@ export function isInsideExistingMarker(text, start, end) {
  * Check whether the given [start, end) span overlaps any existing match in the list.
  * Uses sorted-array binary search for O(log n) performance.
  */
+export function isAllowlisted(value, ctx) {
+    if (!value)
+        return false;
+    const trimmed = value.trim();
+    if (ctx.config.allowlistLiteral?.length) {
+        for (let i = 0; i < ctx.config.allowlistLiteral.length; i++) {
+            if (ctx.config.allowlistLiteral[i] === value || ctx.config.allowlistLiteral[i] === trimmed)
+                return true;
+        }
+    }
+    if (ctx.config.allowlistEnv?.length) {
+        for (let i = 0; i < ctx.config.allowlistEnv.length; i++) {
+            const name = ctx.config.allowlistEnv[i];
+            let envVal;
+            try {
+                envVal = process.env[name];
+            }
+            catch {
+                continue;
+            }
+            if (!envVal)
+                continue;
+            if (envVal === value || envVal === trimmed)
+                return true;
+        }
+    }
+    if (ctx.config.allowlistRegex?.length) {
+        for (let i = 0; i < ctx.config.allowlistRegex.length; i++) {
+            const pat = ctx.config.allowlistRegex[i];
+            if (!pat)
+                continue;
+            try {
+                const re = new RegExp(pat);
+                if (re.test(value))
+                    return true;
+            }
+            catch { }
+        }
+    }
+    return false;
+}
+export function isAllowlistedLiteralOrEnv(value, ctx) {
+    if (!value)
+        return false;
+    const trimmed = value.trim();
+    if (ctx.config.allowlistLiteral?.length) {
+        for (let i = 0; i < ctx.config.allowlistLiteral.length; i++) {
+            if (ctx.config.allowlistLiteral[i] === value || ctx.config.allowlistLiteral[i] === trimmed)
+                return true;
+        }
+    }
+    if (ctx.config.allowlistEnv?.length) {
+        for (let i = 0; i < ctx.config.allowlistEnv.length; i++) {
+            const name = ctx.config.allowlistEnv[i];
+            let envVal;
+            try {
+                envVal = process.env[name];
+            }
+            catch {
+                continue;
+            }
+            if (!envVal)
+                continue;
+            if (envVal === value || envVal === trimmed)
+                return true;
+        }
+    }
+    return false;
+}
 export function hasOverlap(sortedMatches, start, end) {
     // Binary search for first match with end > start
     let lo = 0;

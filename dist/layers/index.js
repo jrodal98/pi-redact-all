@@ -8,9 +8,11 @@ import * as layer6 from "./layer-6-context.js";
 import * as layer7 from "./layer-7-path.js";
 import * as layer8 from "./layer-8-pii.js";
 import * as layer9 from "./layer-9-10-connection.js";
-import { applyMatches } from "./shared.js";
+import * as layerCustom from "./layer-custom.js";
+import { applyMatches, isAllowlistedLiteralOrEnv } from "./shared.js";
 const ALL_LAYERS = [
-    { id: "path", apply: layer7.apply }, // Path-detection FIRST — if path is sensitive, protect everything
+    { id: "path", apply: layer7.apply },
+    { id: "custom", apply: layerCustom.apply },
     { id: "vendor", apply: layer1.apply },
     { id: "prefix", apply: layer3.apply },
     { id: "pem", apply: layer2.apply },
@@ -18,7 +20,7 @@ const ALL_LAYERS = [
     { id: "context", apply: layer6.apply },
     { id: "connection", apply: layer9.apply },
     { id: "pii", apply: layer8.apply },
-    { id: "entropy", apply: layer4.apply }, // Entropy LAST — most expensive, least specific
+    { id: "entropy", apply: layer4.apply },
 ];
 export function redactText(text, ctx) {
     // Graceful handling of null/undefined/empty
@@ -34,7 +36,14 @@ export function redactText(text, ctx) {
     // / AKIA / sk- tokens that are shorter than the entropy layer's threshold.
     // Per-layer length checks (entropy's minLength, pii regexes, etc.) still
     // gate the expensive paths; this is just the cheap global short-circuit.
-    if (text.length < 16) {
+    const hasCustom = ctx.config.layers.custom && ((ctx.config.blocklistRegex?.length ?? 0) > 0 ||
+        (ctx.config.blocklistLiteral?.length ?? 0) > 0 ||
+        (ctx.config.blocklistEnv?.length ?? 0) > 0 ||
+        (ctx.config.customRegex?.length ?? 0) > 0 ||
+        (ctx.config.customLiterals?.length ?? 0) > 0 ||
+        (ctx.config.envVars?.length ?? 0) > 0);
+    const threshold = hasCustom ? 2 : 16;
+    if (text.length < threshold) {
         return { text, matches: [] };
     }
     let current = text;
@@ -45,9 +54,17 @@ export function redactText(text, ctx) {
         const result = layer.apply(current, ctx);
         if (result.matches.length === 0)
             continue;
-        // Apply this layer's matches to current
-        current = applyMatches(current, result.matches);
-        allMatches.push(...result.matches);
+        let matches = result.matches;
+        if (ctx.config.allowlistLiteral?.length || ctx.config.allowlistEnv?.length) {
+            matches = matches.filter((m) => {
+                const val = current.slice(m.start, m.end);
+                return !isAllowlistedLiteralOrEnv(val, ctx);
+            });
+            if (matches.length === 0)
+                continue;
+        }
+        current = applyMatches(current, matches);
+        allMatches.push(...matches);
     }
     return { text: current, matches: allMatches };
 }

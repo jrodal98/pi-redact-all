@@ -33,9 +33,17 @@ export interface Config {
         path: boolean;
         pii: boolean;
         connection: boolean;
+        custom: boolean;
     };
     allowlistRegex: string[];
+    allowlistLiteral: string[];
+    allowlistEnv: string[];
     blocklistRegex: string[];
+    blocklistLiteral: string[];
+    blocklistEnv: string[];
+    customRegex: string[];
+    customLiterals: string[];
+    envVars: string[];
     minEntropy: number;
     minLength: number;
     preservePrefixChars: number;

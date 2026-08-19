@@ -20,12 +20,20 @@ export const DEFAULT_CONFIG = {
         path: true,
         pii: false,
         connection: true,
+        custom: true,
     },
     allowlistRegex: [
         "\\b[a-f0-9]{40}\\b",
         "\\b[0-9a-f]{7,40}\\b",
     ],
+    allowlistLiteral: [],
+    allowlistEnv: [],
     blocklistRegex: [],
+    blocklistLiteral: [],
+    blocklistEnv: [],
+    customRegex: [],
+    customLiterals: [],
+    envVars: [],
     minEntropy: 4.5,
     minLength: 32,
     preservePrefixChars: 4,
@@ -64,13 +72,38 @@ function mergeConfig(base, user) {
             path: user.layers?.path ?? base.layers.path,
             pii: user.layers?.pii ?? base.layers.pii,
             connection: user.layers?.connection ?? base.layers.connection,
+            custom: user.layers?.custom !== undefined ? user.layers.custom : base.layers.custom,
         },
-        allowlistRegex: user.allowlistRegex ?? base.allowlistRegex,
-        blocklistRegex: user.blocklistRegex ?? base.blocklistRegex,
+        allowlistRegex: collectStringArrays(user, ["allowlistRegex", "allowListRegex"]) ?? base.allowlistRegex,
+        allowlistLiteral: collectStringArrays(user, ["allowlistLiteral", "allowListLiteral", "allowlistLiterals", "allowListLiterals"]) ?? base.allowlistLiteral,
+        allowlistEnv: collectStringArrays(user, ["allowlistEnv", "allowListEnv", "allowlistEnvs", "allowListEnvs", "allowlistEnvVars", "allowListEnvVars"]) ?? base.allowlistEnv,
+        blocklistRegex: collectStringArrays(user, ["blocklistRegex", "blockListRegex", "customRegex", "customPatterns"]) ?? base.blocklistRegex,
+        blocklistLiteral: collectStringArrays(user, ["blocklistLiteral", "blockListLiteral", "blocklistLiterals", "blockListLiterals", "customLiterals", "customLiteral", "customExact", "customExactMatches", "exactMatches"]) ?? base.blocklistLiteral,
+        blocklistEnv: collectStringArrays(user, ["blocklistEnv", "blockListEnv", "blocklistEnvs", "blockListEnvs", "blocklistEnvVars", "envVars", "redactEnvVars", "envVarNames"]) ?? base.blocklistEnv,
+        customRegex: collectStringArrays(user, ["customRegex", "customPatterns", "blocklistRegex", "blockListRegex"]) ?? base.customRegex,
+        customLiterals: collectStringArrays(user, ["customLiterals", "customLiteral", "customExact", "customExactMatches", "exactMatches", "blocklistLiteral", "blockListLiteral", "blocklistLiterals"]) ?? base.customLiterals,
+        envVars: collectStringArrays(user, ["envVars", "redactEnvVars", "envVarNames", "blocklistEnv", "blockListEnv", "blocklistEnvs"]) ?? base.envVars,
         minEntropy: user.minEntropy ?? base.minEntropy,
         minLength: user.minLength ?? base.minLength,
         preservePrefixChars: user.preservePrefixChars ?? base.preservePrefixChars,
         asterisksMax: user.asterisksMax ?? base.asterisksMax,
     };
+}
+function collectStringArrays(user, keys) {
+    const out = [];
+    let found = false;
+    for (const k of keys) {
+        const v = user[k];
+        if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
+            found = true;
+            out.push(...v);
+        }
+    }
+    if (!found)
+        return undefined;
+    return [...new Set(out)];
+}
+function pickStringArray(user, keys) {
+    return collectStringArrays(user, keys);
 }
 //# sourceMappingURL=config.js.map
