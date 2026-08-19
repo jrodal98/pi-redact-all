@@ -1,10 +1,13 @@
-// Layer 7: File-Path-basierte Erkennung
-// Wenn das read-Tool auf eine sensible Datei zugreift, ganzen Inhalt redacted
-
 import type { Match, RedactionContext, LayerResult } from "../types.js";
 
+const DOTENV_EXAMPLE_RE = /\.env\.(example|sample|template)$/i;
+
+function isDotenvExample(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".env.example") || lower.endsWith(".env.sample") || lower.endsWith(".env.template");
+}
+
 const SENSITIVE_PATH_PATTERNS: { pattern: RegExp; type: string }[] = [
-  // PEM/Cert-Files
   { pattern: /\.pem$/i, type: "PEM File" },
   { pattern: /\.crt$/i, type: "Certificate File" },
   { pattern: /\.cer$/i, type: "Certificate File" },
@@ -13,21 +16,17 @@ const SENSITIVE_PATH_PATTERNS: { pattern: RegExp; type: string }[] = [
   { pattern: /\.p7c$/i, type: "PKCS7 File" },
   { pattern: /\.p12$/i, type: "PKCS12 File" },
   { pattern: /\.pfx$/i, type: "PKCS12 File" },
-  // SSH-Keys
   { pattern: /(^|\/)\.ssh\/id_(rsa|ed25519|ecdsa|dsa)(\.pub)?$/i, type: "SSH Key" },
   { pattern: /\.ssh\/config$/i, type: "SSH Config" },
   { pattern: /\.ssh\/known_hosts$/i, type: "SSH Known Hosts" },
   { pattern: /\.ssh\/authorized_keys$/i, type: "SSH Authorized Keys" },
-  // Environment
   { pattern: /(^|\/)\.env(\.\w+)?$/i, type: "Env File" },
-  // Cloud credentials
   { pattern: /\.aws\/credentials$/i, type: "AWS Credentials" },
   { pattern: /\.aws\/config$/i, type: "AWS Config" },
   { pattern: /\.npmrc$/i, type: "npm Config" },
   { pattern: /\.pypirc$/i, type: "PyPI Config" },
   { pattern: /\.netrc$/i, type: "Netrc File" },
   { pattern: /\.docker\/config\.json$/i, type: "Docker Config" },
-  // Generic
   { pattern: /\.gitconfig-credentials$/i, type: "Git Credentials" },
   { pattern: /(^|\/)credentials(\.\w+)?$/i, type: "Credentials File" },
   { pattern: /(^|\/)secrets?\.(ya?ml|json|env)$/i, type: "Secrets File" },
@@ -37,12 +36,11 @@ const SENSITIVE_PATH_PATTERNS: { pattern: RegExp; type: string }[] = [
 
 export function apply(text: string, ctx: RedactionContext): LayerResult {
   const matches: Match[] = [];
-
-  // Only applies to read-tool with a known path
   if (ctx.toolName !== "read") return { matches };
   if (!ctx.inputPath) return { matches };
-
+  if (isDotenvExample(ctx.inputPath)) return { matches };
   for (const { pattern, type } of SENSITIVE_PATH_PATTERNS) {
+    if (type === "Env File" && DOTENV_EXAMPLE_RE.test(ctx.inputPath)) continue;
     if (pattern.test(ctx.inputPath)) {
       matches.push({
         start: 0,
@@ -53,24 +51,20 @@ export function apply(text: string, ctx: RedactionContext): LayerResult {
       return { matches };
     }
   }
-
   return { matches };
 }
 
-/**
- * Returns true if the path should be blocked entirely (PreToolUse hook).
- */
 export function shouldBlockPath(path: string): boolean {
-  for (const { pattern } of SENSITIVE_PATH_PATTERNS) {
+  if (isDotenvExample(path)) return false;
+  for (const { pattern, type } of SENSITIVE_PATH_PATTERNS) {
+    if (type === "Env File" && DOTENV_EXAMPLE_RE.test(path)) continue;
     if (pattern.test(path)) return true;
   }
   return false;
 }
 
-/**
- * Returns true if the bash command reads sensitive paths.
- */
 export function commandReadsSensitive(command: string): boolean {
+  if (/\.env\.(example|sample|template)\b/i.test(command)) return false;
   const sensitiveNames = [
     ".env",
     "id_rsa",
@@ -84,10 +78,11 @@ export function commandReadsSensitive(command: string): boolean {
     ".gitconfig-credentials",
   ];
   for (const name of sensitiveNames) {
-    // cat/cp/mv/grep/less/more <path>
     const re = new RegExp(`\\b(?:cat|cp|mv|grep|less|more|head|tail|vi[m]?|nano|less)\\b\\s+[^|;&]*${name.replace(/\./g, "\\.")}`, "i");
-    if (re.test(command)) return true;
-    // printenv | grep SECRET
+    if (re.test(command)) {
+      if (name === ".env" && DOTENV_EXAMPLE_RE.test(command)) continue;
+      return true;
+    }
     const envRe = new RegExp(`\\bprintenv\\b.*${name}`, "i");
     if (envRe.test(command)) return true;
   }

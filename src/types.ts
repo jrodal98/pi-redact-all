@@ -46,6 +46,9 @@ export interface Config {
   blocklistRegex: string[];
   blocklistLiteral: string[];
   blocklistEnv: string[];
+  blocklistDotenv: string[];
+  blocklistDotenvDiscover: string[];
+  blocklistDotenvExcludeKeys: string[];
   customRegex: string[];
   customLiterals: string[];
   envVars: string[];
